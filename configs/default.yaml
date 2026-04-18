@@ -1,0 +1,47 @@
+# Default configuration for spherical neural network training
+
+# Task specification
+task:
+  name: "modular_addition"  # Task name (see src/tasks/ for available tasks)
+  p: 23                      # Prime modulus for modular arithmetic
+
+# Basis specification
+basis:
+  name: "fourier"            # Basis type: fourier, walsh, etc.
+
+# Model configuration
+model:
+  width: 128                 # Number of neurons (M)
+  act_type: "Quad"           # Activation: ReLU, Quad, Abs, GeLU
+  init_scale: 0.5            # Initial scale for scale_in and scale_out
+
+# Stage 1: Projected GD on unit sphere (directions only)
+stage1:
+  enabled: true
+  lr: 0.001
+  num_epochs: 6000
+  optimizer: "Adam"          # Adam or SGD
+  freeze_scales: true        # Keep scales fixed during stage 1
+
+# Stage 2: Standard GD (can train directions and/or scales)
+stage2:
+  enabled: true
+  lr: 5.0
+  num_epochs: 50000
+  optimizer: "SGD"           # Adam or SGD
+  train_directions: true     # Train W_in and W_out
+  train_scales: false        # Train scale_in and scale_out
+
+# Logging and saving
+logging:
+  print_every: 2000          # Print progress every N epochs
+  save_every: 1000           # Save checkpoint every N epochs
+  track_phases: true         # Track phase evolution
+  track_scales: true         # Track scale evolution
+  phase_save_every: 200      # Save phase/scale info every N epochs
+
+# Random seed
+seed: 42
+
+# Device (auto, cuda, cpu)
+device: "auto"
