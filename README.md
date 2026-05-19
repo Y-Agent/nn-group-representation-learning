@@ -1,216 +1,89 @@
-# Spherical Neural Network Learning
+# Neural Networks Provably Learn Spectral Representations for Group Composition
 
-A modular framework for training wide neural networks with spherical parameterization on discrete function learning tasks.
+Public code repository for the paper **"Neural Networks Provably Learn Spectral Representations for Group Composition"** by Jianliang He\*, Leda Wang\*, Fengzhuo Zhang, Siyu Chen, Zhuoran Yang.
 
 ## Overview
 
-This project implements a two-stage training procedure for wide neural networks where weight directions are constrained to lie on the unit sphere:
+This repository provides experiments supporting the theoretical analysis of how two-layer neural networks learn group composition $(g_1, g_2) \mapsto g_1 \star g_2$ for finite groups via projected gradient descent. We demonstrate that training drives each neuron to specialize in a single irreducible representation, with rank-one cross-layer Fourier alignment.
 
-**Stage 1: Projected Gradient Descent (Spherical Constraint)**
-- Train only directions (W_in, W_out) while keeping scales fixed
-- Gradients are projected onto the tangent space of the unit sphere
-- Directions are re-normalized after each step
+## Supported Groups & Tasks
 
-**Stage 2: Standard Gradient Descent**
-- Train directions, scales, or both
-- No spherical constraint
+The code supports group composition on any finite group registered in `src/tasks/` and `src/basis/`. Currently implemented:
 
-## Installation
+| Group | Type | Basis |
+|-------|------|-------|
+| $\mathbb{Z}_{n_1} \oplus \cdots \oplus \mathbb{Z}_{n_d}$ (product of cyclic groups / generalized modular addition) | Abelian | Fourier (1D irreps) |
+| Frobenius group $G = C_7 \rtimes C_3$, $\|G\| = 21$ | Non-Abelian | Peter–Weyl (1D + 3D irreps) |
+| Symmetric group $S_n$, $n \leq 4$ ($\|S_n\| = n!$) | Non-Abelian | Young tableau irreps |
+| Alternating group $A_n$, $n \leq 5$ ($\|A_n\| = n!/2$) | Non-Abelian | Restricted-from-$S_n$ irreps |
 
-```bash
-pip install -r requirements.txt
-```
+Both **shared** embedding (`share_embed=True`, suited for commutative/Abelian groups) and **unshared** embedding (`share_embed=False`, required for non-commutative groups) are supported. Dedicated notebooks are provided for the modular addition and Frobenius-21 examples; $S_n$ and $A_n$ can be used directly via the Python API.
 
-## Quick Start
+## Training Recipe
 
-```bash
-# Run with default config
-python scripts/train.py
+Training follows the two-stage procedure from the paper:
 
-# Run with custom parameters
-python scripts/train.py --p 47 --width 256 --stage1-epochs 10000 --analyze
+**Stage 1 — Direction learning** (projected gradient descent on the unit sphere):
+- Input/output weight directions $(\theta^1_m, \theta^2_m, \xi_m)$ are constrained to $\mathbb{S}^{|G|-1}$
+- Gradients are projected onto the tangent space; directions are renormalized after each step
+- Scaling factors $a_m$ are frozen
 
-# Run only Stage 1
-python scripts/train.py --no-stage2 --analyze
+**Stage 2 — Scale optimization**:
+- Directions are frozen from Stage 1
+- Scaling factors $a_m$ are optimized (tied scalar or per-neuron)
 
-# Use different task
-python scripts/train.py --task modular_subtraction --p 23
-```
+Standard gradient descent (no sphere constraint) is also provided for comparison.
+
+## Notebooks
+
+| Notebook | Description |
+|----------|-------------|
+| `frobenius21_group_unshared.ipynb` | Stage 1 on Frobenius-21: single-representation, rank-1 alignment, phase analysis |
+| `frobenius21_group_standard.ipynb` | Standard GD on Frobenius-21 for comparison |
+| `frobenius21_scale_comparison.ipynb` | Stage 1 + Stage 2, tied vs. per-neuron scale growth |
+| `modular_addition_unshared.ipynb` | Stage 1 on $\mathbb{Z}_{n_1} \oplus \cdots \oplus \mathbb{Z}_{n_d}$ with unshared embedding |
+| `modular_addition_unshared_running_example.ipynb` | Lightweight running example |
+| `modular_addition_single_freq_phase_convergence.ipynb` | Phase convergence under specialized initialization |
 
 ## Project Structure
 
 ```
-spherical-nn-learning/
-├── configs/
-│   └── default.yaml          # Default configuration
-├── scripts/
-│   └── train.py              # Main training script
+nn-group-representation-learning/
 ├── src/
-│   ├── __init__.py
-│   ├── config.py             # Configuration management
-│   ├── model.py              # WideNetworkScaleSphere model
-│   ├── trainer.py            # SphericalTrainer class
-│   ├── utils.py              # Utility functions
-│   ├── tasks/                # Task definitions
-│   │   ├── __init__.py
-│   │   ├── base.py           # Abstract Task class
-│   │   └── modular.py        # Modular arithmetic tasks
-│   └── basis/                # Spectral basis definitions
-│       ├── __init__.py
-│       ├── base.py           # Abstract Basis class
-│       └── fourier.py        # Fourier basis
-└── requirements.txt
-```
-
-## Configuration
-
-Configuration can be specified via YAML file and/or command line overrides.
-
-### YAML Config (configs/default.yaml)
-
-```yaml
-task:
-  name: "modular_addition"
-  p: 23
-
-basis:
-  name: "fourier"
-
-model:
-  width: 128
-  act_type: "Quad"
-  init_scale: 0.5
-
-stage1:
-  enabled: true
-  lr: 0.001
-  num_epochs: 6000
-  optimizer: "Adam"
-  freeze_scales: true
-
-stage2:
-  enabled: true
-  lr: 5.0
-  num_epochs: 50000
-  optimizer: "SGD"
-  train_directions: true
-  train_scales: false
-```
-
-### Command Line Arguments
-
-```
---task          Task name (modular_addition, modular_subtraction, etc.)
---p             Prime modulus
---width, -M     Number of neurons
---act           Activation (ReLU, Quad, Abs, GeLU)
---init-scale    Initial scale value
-
---stage1-lr     Stage 1 learning rate
---stage1-epochs Stage 1 epochs
---no-stage1     Disable Stage 1
-
---stage2-lr     Stage 2 learning rate
---stage2-epochs Stage 2 epochs
---no-stage2     Disable Stage 2
-
---analyze       Run phase alignment analysis
---save-path     Path to save checkpoint
-```
-
-## Adding New Tasks
-
-Create a new task by implementing the `Task` interface:
-
-```python
-from src.tasks.base import Task
-
-class MyTask(Task):
-    def __init__(self, p: int):
-        self.p = p
-
-    @property
-    def name(self) -> str:
-        return "my_task"
-
-    @property
-    def input_dim(self) -> int:
-        return 2
-
-    @property
-    def vocab_size(self) -> int:
-        return self.p
-
-    def compute_label(self, a: int, b: int) -> int:
-        return (a * b) % self.p  # Example: modular multiplication
-
-    def generate_all_data(self, device):
-        # Generate all (input, label) pairs
-        ...
-```
-
-Then register it in `src/tasks/__init__.py`:
-
-```python
-TASK_REGISTRY["my_task"] = MyTask
-```
-
-## Adding New Bases
-
-Create a new basis by implementing the `Basis` interface:
-
-```python
-from src.basis.base import Basis
-
-class WalshBasis(Basis):
-    def __init__(self, n: int):
-        self.n = n
-
-    @property
-    def name(self) -> str:
-        return "walsh"
-
-    @property
-    def size(self) -> int:
-        return 2 ** self.n
-
-    def get_basis_matrix(self, device):
-        # Return orthonormal Walsh-Hadamard basis
-        ...
-```
-
-Then register it in `src/basis/__init__.py`:
-
-```python
-BASIS_REGISTRY["walsh"] = WalshBasis
+│   ├── model.py              # WideNetworkScaleSphere
+│   ├── trainer.py            # SphericalTrainer (Stage 1 & 2)
+│   ├── config.py             # Config dataclass
+│   ├── utils.py              # Training utilities
+│   ├── frobenius_analysis.py # Spectral analysis: d_sim, Plancherel energy, rank-1 ratio
+│   ├── plotting.py           # Generic DFT plots: plot_dft_bars, plot_dft_heatmap
+│   ├── tasks/                # Group composition tasks
+│   └── basis/                # Spectral bases (Fourier, Frobenius-21 Peter–Weyl)
+├── notebooks/
+└── figures/
 ```
 
 ## Python API
 
 ```python
-from src.config import Config
-from src.trainer import SphericalTrainer
+from src import Config, SphericalTrainer
 
-# Create config
 config = Config(
-    task_name="modular_addition",
-    p=23,
-    width=128,
-    act_type="Quad",
-    stage1_num_epochs=6000,
-    stage2_num_epochs=50000
+    task_name='modular_addition',
+    n=[3, 5],           # G = Z_3 x Z_5
+    width=512,
+    act_type='Quad',
+    share_embed=True,   # shared for Abelian; False for non-Abelian
+    stage1_lr=1e-3,
+    stage1_num_epochs=1000,
+    stage2_enabled=False,
 )
 
-# Create trainer
 trainer = SphericalTrainer(config)
+trainer.train()
+```
 
-# Train
-stage1_history, stage2_history = trainer.train()
+## Installation
 
-# Analyze
-analysis = trainer.analyze_phase_alignment()
-print(f"Phase alignment: {analysis['phase_match_count']}/{analysis['total_neurons']}")
-
-# Access model
-model = trainer.model
+```bash
+pip install -r requirements.txt
 ```

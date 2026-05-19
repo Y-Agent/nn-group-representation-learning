@@ -9,3 +9,4 @@ build/
 .env
 *.pt
 *.pth
+notebooks/deprecated/

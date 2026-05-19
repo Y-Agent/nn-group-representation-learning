@@ -36,15 +36,13 @@ def accuracy(logits: torch.Tensor, labels: torch.Tensor) -> float:
 
 
 def normalize_to_pi(x: float) -> float:
-    """Normalize angle to [-pi, pi] range.
-
-    Args:
-        x: Angle in radians
-
-    Returns:
-        Angle normalized to [-pi, pi]
-    """
+    """Normalize angle to [-pi, pi] range."""
     return (x + np.pi) % (2 * np.pi) - np.pi
+
+
+def normalize_to_2pi(x: float) -> float:
+    """Normalize angle to [0, 2*pi) range."""
+    return x % (2 * np.pi)
 
 
 def project_gradient_to_tangent_space(
