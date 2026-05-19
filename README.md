@@ -1,5 +1,3 @@
-# Neural Networks Provably Learn Spectral Representations for Group Composition
-
 Public code repository for the paper **"Neural Networks Provably Learn Spectral Representations for Group Composition"** by Jianliang He\*, Leda Wang\*, Fengzhuo Zhang, Siyu Chen, Zhuoran Yang.
 
 ## Overview
