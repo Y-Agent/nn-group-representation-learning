@@ -20,10 +20,11 @@ def parse_args():
 
     # Config file
     parser.add_argument(
-        "--config", "-c",
+        "--config",
+        "-c",
         type=str,
         default=None,
-        help="Path to YAML config file (default: configs/default.yaml)"
+        help="Path to YAML config file (default: configs/default.yaml)",
     )
 
     # Task arguments
@@ -37,22 +38,33 @@ def parse_args():
     parser.add_argument("--width", "-M", type=int, help="Number of neurons (width)")
     parser.add_argument("--act", type=str, help="Activation type (ReLU, Quad, Abs, GeLU)")
     parser.add_argument("--init-scale", type=float, help="Initial scale value")
-    parser.add_argument("--no-share-embed", action="store_true",
-                       help="Use separate embeddings per position (for non-commutative ops like subtraction)")
+    parser.add_argument(
+        "--no-share-embed",
+        action="store_true",
+        help="Use separate embeddings per position (for non-commutative ops like subtraction)",
+    )
 
     # Stage 1 arguments
     parser.add_argument("--stage1-lr", type=float, help="Stage 1 learning rate")
     parser.add_argument("--stage1-epochs", type=int, help="Stage 1 number of epochs")
-    parser.add_argument("--stage1-optimizer", type=str, help="Stage 1 optimizer (Adam, SGD)")
+    parser.add_argument(
+        "--stage1-optimizer", type=str, help="Stage 1 optimizer (SGD for paper flow)"
+    )
     parser.add_argument("--no-stage1", action="store_true", help="Disable Stage 1")
 
     # Stage 2 arguments
     parser.add_argument("--stage2-lr", type=float, help="Stage 2 learning rate")
     parser.add_argument("--stage2-epochs", type=int, help="Stage 2 number of epochs")
-    parser.add_argument("--stage2-optimizer", type=str, help="Stage 2 optimizer (Adam, SGD)")
+    parser.add_argument(
+        "--stage2-optimizer", type=str, help="Stage 2 optimizer (SGD for paper flow)"
+    )
     parser.add_argument("--no-stage2", action="store_true", help="Disable Stage 2")
-    parser.add_argument("--stage2-train-scales", action="store_true", help="Train scales in Stage 2")
-    parser.add_argument("--stage2-no-directions", action="store_true", help="Don't train directions in Stage 2")
+    parser.add_argument(
+        "--stage2-train-scales", action="store_true", help="Train scales in Stage 2"
+    )
+    parser.add_argument(
+        "--stage2-no-directions", action="store_true", help="Don't train directions in Stage 2"
+    )
 
     # Logging arguments
     parser.add_argument("--print-every", type=int, help="Print progress every N epochs")
@@ -64,7 +76,9 @@ def parse_args():
 
     # Output
     parser.add_argument("--save-path", type=str, help="Path to save final checkpoint")
-    parser.add_argument("--analyze", action="store_true", help="Run phase alignment analysis after training")
+    parser.add_argument(
+        "--analyze", action="store_true", help="Run phase alignment analysis after training"
+    )
 
     return parser.parse_args()
 
@@ -83,23 +97,23 @@ def main():
 
     if args.task:
         overrides["task_name"] = args.task
-    if args.p:
+    if args.p is not None:
         overrides["p"] = args.p
     if args.basis:
         overrides["basis_name"] = args.basis
-    if args.width:
+    if args.width is not None:
         overrides["width"] = args.width
     if args.act:
         overrides["act_type"] = args.act
-    if args.init_scale:
+    if args.init_scale is not None:
         overrides["init_scale"] = args.init_scale
     if args.no_share_embed:
         overrides["share_embed"] = False
 
     # Stage 1
-    if args.stage1_lr:
+    if args.stage1_lr is not None:
         overrides["stage1_lr"] = args.stage1_lr
-    if args.stage1_epochs:
+    if args.stage1_epochs is not None:
         overrides["stage1_num_epochs"] = args.stage1_epochs
     if args.stage1_optimizer:
         overrides["stage1_optimizer"] = args.stage1_optimizer
@@ -107,9 +121,9 @@ def main():
         overrides["stage1_enabled"] = False
 
     # Stage 2
-    if args.stage2_lr:
+    if args.stage2_lr is not None:
         overrides["stage2_lr"] = args.stage2_lr
-    if args.stage2_epochs:
+    if args.stage2_epochs is not None:
         overrides["stage2_num_epochs"] = args.stage2_epochs
     if args.stage2_optimizer:
         overrides["stage2_optimizer"] = args.stage2_optimizer
@@ -121,13 +135,13 @@ def main():
         overrides["stage2_train_directions"] = False
 
     # Logging
-    if args.print_every:
+    if args.print_every is not None:
         overrides["print_every"] = args.print_every
-    if args.save_every:
+    if args.save_every is not None:
         overrides["save_every"] = args.save_every
 
     # System
-    if args.seed:
+    if args.seed is not None:
         overrides["seed"] = args.seed
     if args.device:
         overrides["device"] = args.device
@@ -140,9 +154,15 @@ def main():
     print("=" * 60)
     print(f"Config: {config_path}")
     print(f"Task: {config.task_name} (p={config.p})")
-    print(f"Model: width={config.width}, act={config.act_type}, init_scale={config.init_scale}, share_embed={config.share_embed}")
-    print(f"Stage 1: enabled={config.stage1_enabled}, lr={config.stage1_lr}, epochs={config.stage1_num_epochs}")
-    print(f"Stage 2: enabled={config.stage2_enabled}, lr={config.stage2_lr}, epochs={config.stage2_num_epochs}")
+    print(
+        f"Model: width={config.width}, act={config.act_type}, init_scale={config.init_scale}, share_embed={config.share_embed}"
+    )
+    print(
+        f"Stage 1: enabled={config.stage1_enabled}, lr={config.stage1_lr}, epochs={config.stage1_num_epochs}"
+    )
+    print(
+        f"Stage 2: enabled={config.stage2_enabled}, lr={config.stage2_lr}, epochs={config.stage2_num_epochs}"
+    )
     print("=" * 60)
 
     # Create trainer
@@ -165,11 +185,15 @@ def main():
 
     # Summary
     if stage1_history.losses:
-        print(f"Stage 1: Final loss={stage1_history.losses[-1]:.6f}, "
-              f"Final acc={stage1_history.accuracies[-1]:.4f}")
+        print(
+            f"Stage 1: Final loss={stage1_history.losses[-1]:.6f}, "
+            f"Final acc={stage1_history.accuracies[-1]:.4f}"
+        )
     if stage2_history.losses:
-        print(f"Stage 2: Final loss={stage2_history.losses[-1]:.6f}, "
-              f"Final acc={stage2_history.accuracies[-1]:.4f}")
+        print(
+            f"Stage 2: Final loss={stage2_history.losses[-1]:.6f}, "
+            f"Final acc={stage2_history.accuracies[-1]:.4f}"
+        )
 
 
 if __name__ == "__main__":

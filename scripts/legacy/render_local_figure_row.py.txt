@@ -1,0 +1,58 @@
+"""Four equally sized local panels for a single-row Figure 7 preview."""
+from pathlib import Path
+import runpy,json
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+
+base=runpy.run_path(str(Path(__file__).with_name('render_local_figure_polish.py')))
+OUT=base['OUT'];d=base['d'];LW=base['LW'];save=base['save']
+colors=['#6C7785','#477DA5','#914F63']
+labels=[r'$\widehat{\theta^1_m}[\rho_m]$',r'$\widehat{\theta^2_m}[\rho_m]$',r'$\widehat{\xi_m}[\rho_m]$']
+fig,ax=plt.subplots(figsize=(12,8));fig.subplots_adjust(left=.15,right=.85,bottom=.25,top=.90)
+right=ax.twinx();t=d['time'];cadence=max(1,len(t)//20)
+for axis,key,style in [(ax,'alignment','-'),(right,'rank','--')]:
+    for i in range(3):
+        axis.errorbar(t,d[key+'_mean'][i],yerr=d[key+'_std'][i],color=colors[i],ls=style,lw=LW,
+            marker=['o','s','^'][i],ms=4,markerfacecolor='none',markeredgewidth=1.5,
+            markevery=cadence,errorevery=cadence,capsize=2,elinewidth=1.5)
+    axis.tick_params(labelsize=24)
+ax.set_ylim(0,1.06);right.set_ylim(base['diag'].axes[2].get_ylim())
+ax.set_xlim(-500,40500);ax.set_xticks([0,10000,20000,30000,40000])
+ax.set_xlabel('Time',fontsize=30);ax.set_ylabel('Avg. alignment',fontsize=30)
+right.set_ylabel(r'Avg. $\sigma_{(2)} / \sigma_{(1)}$',fontsize=30,labelpad=9)
+ax.grid(True,alpha=.22)
+handles=[Line2D([],[],color=colors[i],marker=['o','s','^'][i],ls='none',markerfacecolor='none',ms=6,label=labels[i]) for i in range(3)]
+handles += [Line2D([],[],color='#444444',lw=LW,ls=style,label=label) for style,label in [('-','Alignment'),('--','Rank ratio')]]
+fig.legend(handles=handles,loc='upper center',bbox_to_anchor=(.5,.13),ncol=5,frameon=False,
+    fontsize=24,handlelength=.9,columnspacing=.4,handletextpad=.25)
+fig.text(.15,.975,'(i)',fontsize=30,va='top');save(fig,'row-alignment')
+
+accuracy,acc=plt.subplots(figsize=(12,8));accuracy.subplots_adjust(left=.15,right=.85,bottom=.25,top=.90)
+acc.plot(d['accuracy_time'],d['accuracy'],color=colors[0],lw=LW)
+acc.set_xlim(-500,40500);acc.set_ylim(-.04,1.08);acc.set_yticks([0,.5,1]);acc.set_xticks([0,10000,20000,30000,40000])
+acc.set_xlabel('Time',fontsize=30);acc.set_ylabel('Accuracy',fontsize=30);acc.tick_params(labelsize=24);acc.grid(True,alpha=.22)
+accuracy.text(.15,.975,'(ii)',fontsize=30,va='top');save(accuracy,'row-accuracy')
+
+loss=base['first'];loss.set_size_inches(12,8)
+for name,pos in [('small',[.15,.25,.14,.65]),('scale_left',[.15,.25,.14,.65]),
+                 ('large',[.32,.25,.53,.65]),('scale',[.32,.25,.53,.65])]:base[name].set_position(pos)
+base['scale'].set_ylim(0,1000);base['scale_left'].set_ylim(0,1000)
+base['scale'].set_yticks([0,500,1000])
+loss.texts[0].set_text('(i)');loss.texts[1].set_position((.5,.15))
+visible=base['e']['s2_times']<=50000
+assert np.max(np.asarray(base['e']['s2_tied_a_hist'])[visible])<1000
+save(loss,'row-scale-loss')
+
+neurons=base['second'];neurons.set_size_inches(12,8);base['ax'].set_position([.15,.25,.70,.65])
+neurons.texts[0].set_text('(ii)');save(neurons,'row-per-neuron-scale')
+panels=[fig,accuracy,loss,neurons]
+for panel in panels:
+    panel.canvas.draw()
+    assert all(np.isclose(a.get_position().y0,.25) and np.isclose(a.get_position().y1,.90) for a in panel.axes)
+(OUT/'row-verification.json').write_text(json.dumps(dict(panel_size_inches=[12,8],
+    axes_bottom=.25,axes_top=.90,alignment_time_axis_visible=True,tied_scale_axis=[0,1000],
+    visible_tied_scale_max=float(np.max(np.asarray(base['e']['s2_tied_a_hist'])[visible])),local_only=True),indent=2))
+print('Four aligned panels rendered; alignment x-axis shown; tied-scale axis capped at 1,000.')

@@ -1,14 +1,14 @@
 """Configuration management for spherical neural network training."""
 
-import yaml
-import torch
 import random
-import numpy as np
 from dataclasses import dataclass, field
-from typing import Optional, Any, Union, List
 from functools import reduce
 from operator import mul
-from pathlib import Path
+from typing import List, Optional
+
+import numpy as np
+import torch
+import yaml
 
 
 def set_all_seeds(seed: int) -> None:
@@ -39,7 +39,9 @@ class Config:
     width: int = 128
     act_type: str = "Quad"
     init_scale: float = 0.5
-    share_embed: bool = True  # If False, use separate embeddings per position (for non-commutative ops)
+    share_embed: bool = (
+        True  # If False, use separate embeddings per position (for non-commutative ops)
+    )
     # Initialization type: "iid" or "matched_scale"
     # Note: "matched_scale" only works for modular tasks with Fourier basis
     init_type: str = "iid"
@@ -48,7 +50,7 @@ class Config:
     stage1_enabled: bool = True
     stage1_lr: float = 0.001
     stage1_num_epochs: int = 6000
-    stage1_optimizer: str = "Adam"
+    stage1_optimizer: str = "SGD"
     stage1_freeze_scales: bool = True
 
     # Stage 2
@@ -56,8 +58,10 @@ class Config:
     stage2_lr: float = 5.0
     stage2_num_epochs: int = 50000
     stage2_optimizer: str = "SGD"
-    stage2_train_directions: bool = True
-    stage2_train_scales: bool = False
+    stage2_train_directions: bool = False
+    stage2_train_scales: bool = True
+    stage2_tied: bool = True
+    stage2_untied_multiplier: float = 1.0
 
     # Logging
     print_every: int = 2000
@@ -76,6 +80,17 @@ class Config:
 
     def __post_init__(self):
         """Initialize computed fields and set seeds."""
+        if self.width <= 0:
+            raise ValueError("width must be positive")
+        for name in ("stage1_lr", "stage2_lr", "stage2_untied_multiplier"):
+            if not np.isfinite(getattr(self, name)) or getattr(self, name) < 0:
+                raise ValueError(f"{name} must be finite and nonnegative")
+        for name in ("stage1_num_epochs", "stage2_num_epochs", "snapshot_every"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be nonnegative")
+        for name in ("print_every", "save_every", "phase_save_every"):
+            if getattr(self, name) <= 0:
+                raise ValueError(f"{name} must be positive")
         set_all_seeds(self.seed)
 
         if self.device == "auto":
@@ -133,7 +148,7 @@ class Config:
             flat_dict["stage1_enabled"] = yaml_dict["stage1"].get("enabled", True)
             flat_dict["stage1_lr"] = yaml_dict["stage1"].get("lr", 0.001)
             flat_dict["stage1_num_epochs"] = yaml_dict["stage1"].get("num_epochs", 6000)
-            flat_dict["stage1_optimizer"] = yaml_dict["stage1"].get("optimizer", "Adam")
+            flat_dict["stage1_optimizer"] = yaml_dict["stage1"].get("optimizer", "SGD")
             flat_dict["stage1_freeze_scales"] = yaml_dict["stage1"].get("freeze_scales", True)
 
         # Stage 2
@@ -142,8 +157,16 @@ class Config:
             flat_dict["stage2_lr"] = yaml_dict["stage2"].get("lr", 5.0)
             flat_dict["stage2_num_epochs"] = yaml_dict["stage2"].get("num_epochs", 50000)
             flat_dict["stage2_optimizer"] = yaml_dict["stage2"].get("optimizer", "SGD")
-            flat_dict["stage2_train_directions"] = yaml_dict["stage2"].get("train_directions", True)
-            flat_dict["stage2_train_scales"] = yaml_dict["stage2"].get("train_scales", False)
+            flat_dict["stage2_train_directions"] = yaml_dict["stage2"].get(
+                "train_directions", False
+            )
+            flat_dict["stage2_train_scales"] = yaml_dict["stage2"].get("train_scales", True)
+
+        if "stage2" in yaml_dict:
+            flat_dict["stage2_tied"] = yaml_dict["stage2"].get("tied", True)
+            flat_dict["stage2_untied_multiplier"] = yaml_dict["stage2"].get(
+                "untied_multiplier", 1.0
+            )
 
         # Logging
         if "logging" in yaml_dict:
@@ -166,8 +189,7 @@ class Config:
     @classmethod
     def from_dict(cls, config_dict: dict, **overrides) -> "Config":
         """Create configuration from dictionary with optional overrides."""
-        config_dict.update(overrides)
-        return cls(**config_dict)
+        return cls(**{**config_dict, **overrides})
 
     def to_dict(self) -> dict:
         """Convert configuration to dictionary."""
@@ -187,6 +209,8 @@ class Config:
             "stage1_optimizer": self.stage1_optimizer,
             "stage1_freeze_scales": self.stage1_freeze_scales,
             "stage2_enabled": self.stage2_enabled,
+            "stage2_tied": self.stage2_tied,
+            "stage2_untied_multiplier": self.stage2_untied_multiplier,
             "stage2_lr": self.stage2_lr,
             "stage2_num_epochs": self.stage2_num_epochs,
             "stage2_optimizer": self.stage2_optimizer,

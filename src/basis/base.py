@@ -1,7 +1,8 @@
 """Abstract base class for spectral bases."""
 
 from abc import ABC, abstractmethod
-from typing import Tuple, List
+from typing import List
+
 import torch
 
 
@@ -62,7 +63,7 @@ class Basis(ABC):
             Spectral coefficients of shape (..., size)
         """
         basis = self.get_basis_matrix(device)
-        return x @ basis.T
+        return x.to(basis.dtype) @ basis.conj().T
 
     def inverse_transform(self, coeffs: torch.Tensor, device: torch.device) -> torch.Tensor:
         """Transform spectral coefficients back to the original domain.

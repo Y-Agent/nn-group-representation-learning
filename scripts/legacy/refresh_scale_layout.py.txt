@@ -1,0 +1,114 @@
+"""Merge Figure 8a/b, retain 8c separately, and disclose a Stage-I time-axis break."""
+from pathlib import Path
+import sys,json,hashlib,argparse
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+ROOT=Path(__file__).resolve().parents[1];DEFAULT_OUT=ROOT/'reproduction/paper_plots_revised';BASE=ROOT/'reproduction/paper_plots';RUNS=ROOT/'reproduction/runs'
+parser=argparse.ArgumentParser()
+parser.add_argument('--output-dir',type=Path,default=DEFAULT_OUT)
+OUT=parser.parse_args().output_dir.resolve()
+(OUT/'figures').mkdir(parents=True,exist_ok=True)
+sys.path.insert(0,str(BASE/'sources/runtime'))
+from src.plotting import setup_plot_style
+setup_plot_style()
+plt.rcParams["font.serif"]=["DejaVu Serif"]
+m=json.loads(((OUT if (OUT/'manifest.json').exists() else DEFAULT_OUT)/'manifest.json').read_text())
+# Check the raw inputs against the original reproduction before using them.
+for name in ['f21_wide_h2/history.json','f21_scale_wide_h2/tied.npz','f21_scale_wide_h2/untied_matched.npz']:
+    assert hashlib.sha256((RUNS/name).read_bytes()).hexdigest()==m['source_data_hashes'][name]
+h=json.loads((RUNS/'f21_wide_h2/history.json').read_text())
+tied=np.load(RUNS/'f21_scale_wide_h2/tied.npz');pn=np.load(RUNS/'f21_scale_wide_h2/untied_matched.npz')
+stride=400;mask=np.flatnonzero(np.isclose(np.mod(tied['time'],stride),0))
+assert np.array_equal(tied['time'],pn['time'])
+env=dict(np=np,plt=plt,S1_LR=stride,S2_LR=stride,S2_EPOCHS=len(mask),WIDTH=pn['a'].shape[1],
+    s1_losses=[r['loss_sum'] for r in h[:-1]],s2_tied_losses=tied['loss_sum'][mask],s2_pn_losses=pn['loss_sum'][mask],
+    s2_tied_a_hist=tied['a'][mask].reshape(-1),s2_pn_traj=pn['a'][mask])
+# Capture all three original plots without exporting or modifying their source.
+original_save,original_show=plt.savefig,plt.show
+plt.savefig=lambda *a,**k:None;plt.show=lambda *a,**k:None
+cells=json.loads((BASE/'sources/frobenius21_scale_comparison.json').read_text())
+exec(cells['11'],env);original_loss=plt.gcf()
+exec(cells['12'],env);original_pn=plt.gcf()
+plt.savefig,plt.show=original_save,original_show
+assert env['s2_offset']==h[-1]['time']==40000
+assert np.array_equal(env['s2_times'],40000+tied['time'][mask])
+fig=plt.figure(figsize=(12,16))
+# The two plotting rows have exactly the same height; legends sit below each row.
+small=fig.add_axes([.15,.6153125,.14,.3425]);large=fig.add_axes([.32,.6153125,.53,.3425],sharey=small)
+scale=large.twinx();bottom=fig.add_axes([.15,.1321875,.70,.3425])
+loss_lines=original_loss.axes[0].lines[:3]
+for ax in [small,large]:
+    for line in loss_lines:
+        ax.plot(line.get_xdata(),line.get_ydata(),color=line.get_color(),linestyle=line.get_linestyle(),linewidth=1.8,label=line.get_label())
+    ax.set_ylim(-.06,3.20);ax.grid(True,alpha=.22);ax.tick_params(labelsize=24)
+small.set_yticks([0,1,2,3]);small.set_xlim(0,8000);small.set_xticks([0,5000]);small.set_ylabel('Loss',fontsize=30)
+large.set_xlim(38000,80000);large.set_xticks([40000,60000,80000]);large.tick_params(left=False,labelleft=False)
+small.spines['right'].set_visible(False);large.spines['left'].set_visible(False);scale.spines['left'].set_visible(False)
+large.axvline(40000,color='#555555',linestyle=':',linewidth=1,alpha=.7)
+scale_line,=scale.plot(env['s2_times'],env['s2_tied_a_hist'],color='#368A87',linestyle='-.',marker='o',markersize=3.5,markevery=env['markevery'],linewidth=1.8,label='Stage II: tied scale')
+scale.set_ylabel('Tied scale $a$',fontsize=30,color='#28736F');scale.tick_params(axis='y',labelcolor='#28736F',labelsize=24)
+scale.set_yticks([0,500,1000]);scale.set_ylim(-25,max(env['s2_tied_a_hist'])*1.08);scale.grid(False)
+# Stage I freezes both factors at 0.5; effective a = scale_out * scale_in**2.
+fixed_scale=float(tied['a'][0,0])
+assert fixed_scale==0.5**3 and np.all(pn['a'][0]==fixed_scale)
+assert float(tied['boundary_max_logit_jump'])<1e-10
+scale_left=small.twinx();scale_left.set_ylim(scale.get_ylim());scale_left.set_yticks([])
+for spine in ['left','right','top','bottom']:scale_left.spines[spine].set_visible(False)
+for ax,xx in [(scale_left,[0,8000]),(scale,[38000,40000])]:
+    ax.plot(xx,[fixed_scale,fixed_scale],color='#368A87',linestyle='-.',linewidth=2)
+
+# Equal-length diagonal break marks in physical figure coordinates.
+for ax,edge in [(small,1),(large,0)]:
+    dx=.004/ax.get_position().width;dy=.006/ax.get_position().height
+    for y in [0,1]:ax.plot([edge-dx,edge+dx],[y-dy,y+dy],transform=ax.transAxes,color='#333333',linewidth=1.2,clip_on=False)
+fig.text(.15,.987625,'(i)',fontsize=30,va='top')
+# The axis break interval is recorded in the figure documentation.
+fig.text(.485,.5703125,'Time (Stage I + II)',fontsize=30,ha='center')
+handles=large.lines[:3]+[scale_line]
+labels=['Stage I loss','Tied loss','Per-neuron loss','Tied scale $a$']
+inside_legend=scale.legend(handles,labels,loc='center right',bbox_to_anchor=(.98,.42),
+    ncol=1,frameon=True,facecolor='white',edgecolor='#dddddd',framealpha=.96,
+    fontsize=24,labelspacing=.3,borderpad=.45,handlelength=1.5)
+# Retain the original per-neuron traces and ordering; change only the requested palette.
+neuron_colors=['#4E79A7','#59A14F','#B58B2A','#C47A35','#76B7B2',
+               '#E15759','#B07AA1','#9C755F','#6C7785','#914F63']
+for rank,line in enumerate(original_pn.axes[0].lines):
+    bottom.plot(line.get_xdata(),line.get_ydata(),color=neuron_colors[rank],linestyle=line.get_linestyle(),
+                linewidth=line.get_linewidth(),marker=line.get_marker(),markersize=4,
+                markevery=line.get_markevery(),label=line.get_label())
+bottom.set_xlim(original_pn.axes[0].get_xlim());bottom.set_ylim(original_pn.axes[0].get_ylim())
+bottom.set_xlabel('Time in Stage II',fontsize=30);bottom.set_ylabel('Per-neuron scale',fontsize=30)
+bottom.set_yticks([0,500,1000]);bottom.set_xticks([0,10000,20000,30000,40000]);bottom.grid(True,alpha=.22);bottom.tick_params(labelsize=24)
+fig.text(.15,.505625,'(ii)',fontsize=30,va='top')
+fig.legend(*bottom.get_legend_handles_labels(),loc='upper center',bbox_to_anchor=(.50,.084375),ncol=5,frameon=False,fontsize=24,labelspacing=.12,borderpad=.15,columnspacing=.9,handlelength=1.3)
+# Verify each scientific trace against the unmodified original plotting cells.
+for new,old in zip(large.lines[:3],loss_lines):
+    assert np.array_equal(new.get_xdata(),old.get_xdata()) and np.array_equal(new.get_ydata(),old.get_ydata())
+for new,old in zip(bottom.lines,original_pn.axes[0].lines):
+    assert np.array_equal(new.get_xdata(),old.get_xdata()) and np.array_equal(new.get_ydata(),old.get_ydata())
+assert np.array_equal(scale_line.get_ydata(),env['s2_tied_a_hist'])
+assert np.isclose(small.get_position().height,bottom.get_position().height)
+fig.canvas.draw();renderer=fig.canvas.get_renderer()
+for legend in fig.legends:
+    assert fig.bbox.contains(*legend.get_window_extent(renderer).get_points()[0])
+    assert fig.bbox.contains(*legend.get_window_extent(renderer).get_points()[1])
+legend_box=inside_legend.get_window_extent(renderer)
+assert all(scale.get_window_extent(renderer).contains(*point) for point in legend_box.get_points())
+for line in list(large.lines[:3])+[scale_line]:
+    assert not line.get_transform().transform_path(line.get_path()).intersects_bbox(legend_box,filled=False)
+name='frobenius21_scale_combined'
+for ext in ['jpg','pdf']:
+    p=OUT/'figures'/(name+'.'+ext);fig.savefig(p,dpi=240,bbox_inches=None)
+    m['figure_hashes'][p.name]=hashlib.sha256(p.read_bytes()).hexdigest()
+check=dict(layout='3:4, equal-height rows; loss + tied scale above independent per-neuron scales',size_inches=[12,16],
+    upper_legend_labels=labels,upper_legend_position='inside panel (i), center right',upper_legend_trace_overlaps=0,
+    stage1_axis_break=[8000,38000],stage1_fixed_scale=fixed_scale,stage1_scale_provenance='Frozen scale factors 0.5 and 0.5; saved Stage II boundary a=0.125',panel_indices=['(i)','(ii)'],font_sizes=dict(ticks=24,axes=30,legend=24,index=30),stage2_time_shift_for_overlay=40000,stage2_curves_complete=True,
+    original_scientific_traces_exact=True,per_neuron_original_order=True,per_neuron_palette="Muted categorical",per_neuron_color_mapping={line.get_label():neuron_colors[i] for i,line in enumerate(original_pn.axes[0].lines)},
+    stage1_loss_full_range=[min(env['s1_losses'])/441,max(env['s1_losses'])/441],row_height_ratio=[1,1])
+m['presentation_checks'][name]=check
+m.setdefault('presentation_script_hashes',{})[Path(__file__).name]=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+m['presentation_revision_description']+='; Figure 8 combined into two panels with an explicit Stage I time break'
+(OUT/'manifest.json').write_text(json.dumps(m,indent=2));(OUT/'scale-layout-verification.json').write_text(json.dumps(check,indent=2))
+plt.close('all');print(json.dumps(check))

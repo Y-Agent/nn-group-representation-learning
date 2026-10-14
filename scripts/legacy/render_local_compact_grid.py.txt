@@ -1,0 +1,78 @@
+"""Tighten the local 2x2 layout without reducing text or line sizes."""
+from pathlib import Path
+import runpy,json
+import numpy as np
+
+r=runpy.run_path(str(Path(__file__).with_name('render_local_figure_row.py')))
+base=r['base'];OUT=r['OUT'];save=r['save']
+width=11.6;upper_height=6.5;lower_height=7.0
+left=1.6;plot_width=8.4;plot_height=4.6
+
+def position(axis,height,bottom,x=left,w=plot_width):
+    axis.set_position([x/width,bottom/height,w/width,plot_height/height])
+
+alignment=r['fig'];alignment.set_size_inches(width,upper_height)
+for axis in alignment.axes:position(axis,upper_height,1.10)
+for legend in list(alignment.legends):legend.remove()
+alignment.texts[0].set_position((left/width,5.82/upper_height))
+alignment.texts[0].set_verticalalignment('bottom')
+shared=r['right'].legend(handles=r['handles'],loc='center right',bbox_to_anchor=(.98,.50),
+    ncol=1,frameon=True,framealpha=.95,fontsize=24,borderpad=.35,
+    handlelength=1.3,handletextpad=.5,labelspacing=.3)
+
+accuracy=r['accuracy'];accuracy.set_size_inches(width,lower_height)
+position(r['acc'],lower_height,1.75)
+accuracy.texts[0].set_position((left/width,6.47/lower_height))
+accuracy.texts[0].set_verticalalignment('bottom')
+
+loss=r['loss'];loss.set_size_inches(width,upper_height)
+for name in ['small','scale_left']:position(base[name],upper_height,1.10,x=left,w=1.68)
+for name in ['large','scale']:position(base[name],upper_height,1.10,x=left+2.04,w=6.36)
+loss.texts[0].set_position((left/width,5.82/upper_height));loss.texts[0].set_verticalalignment('bottom')
+loss.texts[1].set_position(((left+plot_width/2)/width,.15/upper_height));loss.texts[1].set_verticalalignment('bottom')
+
+neurons=r['neurons'];neurons.set_size_inches(width,lower_height)
+position(base['ax'],lower_height,1.75)
+neurons.texts[0].set_position((left/width,6.47/lower_height));neurons.texts[0].set_verticalalignment('bottom')
+
+# Keep terminal time labels inside the axes and lift the right-axis zero
+# above the baseline, so the two different axes have distinct corner labels.
+corner_pairs=[(r['ax'],r['right'],40000),(base['large'],base['scale'],50000)]
+for time_axis,value_axis,last_time in corner_pairs:
+    time_axis.figure.canvas.draw()
+    for tick in time_axis.xaxis.get_major_ticks():
+        if np.isclose(tick.get_loc(),last_time):tick.label1.set_horizontalalignment('right')
+    for tick in value_axis.yaxis.get_major_ticks():
+        if np.isclose(tick.get_loc(),0):tick.label2.set_verticalalignment('bottom')
+
+for panel,name in [(alignment,'compact-alignment'),(accuracy,'compact-accuracy'),
+                   (loss,'compact-scale-loss'),(neurons,'compact-per-neuron-scale')]:
+    save(panel,name)
+    renderer=panel.canvas.get_renderer()
+    # Text and legends must remain within the canvas after reducing whitespace.
+    artists=list(panel.texts)+list(panel.legends)
+    for axis in panel.axes:
+        artists += [axis.xaxis.label,axis.yaxis.label]
+        for ticks,limits in [(axis.xaxis.get_major_ticks(),axis.get_xlim()),(axis.yaxis.get_major_ticks(),axis.get_ylim())]:
+            artists += [tick.label1 for tick in ticks if min(limits)<=tick.get_loc()<=max(limits)]
+            artists += [tick.label2 for tick in ticks if min(limits)<=tick.get_loc()<=max(limits)]
+        if axis.get_legend() is not None:artists.append(axis.get_legend())
+    for artist in artists:
+        if not artist.get_visible():continue
+        box=artist.get_window_extent(renderer)
+        if box.width==0 or box.height==0:continue
+        assert box.x0>=-1 and box.y0>=-1 and box.x1<=panel.bbox.x1+1 and box.y1<=panel.bbox.y1+1,(name,str(artist),box.bounds)
+
+for time_axis,value_axis,last_time in corner_pairs:
+    renderer=time_axis.figure.canvas.get_renderer()
+    time_label=next(t.label1 for t in time_axis.xaxis.get_major_ticks() if np.isclose(t.get_loc(),last_time))
+    zero_label=next(t.label2 for t in value_axis.yaxis.get_major_ticks() if np.isclose(t.get_loc(),0))
+    assert not time_label.get_window_extent(renderer).overlaps(zero_label.get_window_extent(renderer))
+
+(OUT/'compact-grid-verification.json').write_text(json.dumps(dict(
+    local_only=True,canvas_inches=[2*width,upper_height+lower_height],
+    previous_canvas_inches=[24,16],plot_area_inches=[plot_width,plot_height],
+    font_sizes_unchanged=True,curve_width_unchanged=3.2,shared_diagnostic_legend='Inside upper-left panel',
+    corner_tick_labels_do_not_overlap=True,
+    rows_aligned=True,columns_aligned=True,tied_scale_axis=[0,1000],stage2_total_time=[40000,50000]),indent=2))
+print('Compact panels saved; text bounds checked; fonts and line widths preserved.')

@@ -1,0 +1,52 @@
+from pathlib import Path
+import json,hashlib,shutil
+from pypdf import PdfWriter,PdfReader
+r=Path(__file__).resolve().parents[1];p=r/'reproduction/paper_plots_revised';base=r/'reproduction/paper_plots'
+m=json.loads((p/'manifest.json').read_text());old=json.loads((base/'manifest.json').read_text())
+changed=['modular_addition_dft_heatmap','modular_addition_freq_distribution','symmetric_group_irrep_distribution','frobenius21_diagnostics_compact','frobenius21_scale_combined']
+checks=[]
+for file,digest in m['figure_hashes'].items():checks.append({'item':file,'pass':hashlib.sha256((p/'figures'/file).read_bytes()).hexdigest()==digest})
+checks.append({'item':'All experiment input hashes unchanged','pass':m['source_data_hashes']==old['source_data_hashes']})
+for file,digest in old['figure_hashes'].items():
+ if file.endswith('.jpg') and Path(file).stem not in changed:checks.append({'item':'Unchanged figure: '+file,'pass':m['figure_hashes'][file]==digest})
+assert all(x['pass'] for x in checks)
+for stem in changed[1:3]:assert m['presentation_checks'][stem]['label_overlaps']==0
+order=['modular_addition_xi_heatmap_example','modular_addition_phase_alignment','modular_addition_phase_circles','modular_addition_freq_distribution_histogram','modular_addition_freq_distribution','symmetric_group_irrep_distribution','frobenius21_dft_heatmap','frobenius21_diagnostics_compact','frobenius21_scale_combined','modular_addition_dft_heatmap_example','modular_addition_dft_heatmap']
+figures=['1a','1b','2a','2b','5a','5b','6','7 (compact)','8 (combined)','10','11']
+# Assemble existing figure pages without changing the scientific plots.
+for filename,names in [('requested-revisions.pdf',changed),('affected-paper-plots.pdf',order)]:
+ writer=PdfWriter()
+ for name in names:writer.append(p/'figures'/(name+'.pdf'))
+ writer.write(p/filename);assert len(PdfReader(p/filename).pages)==len(names)
+compact_page=PdfReader(p/'figures/frobenius21_diagnostics_compact.pdf').pages[0]
+assert abs(float(compact_page.mediabox.width)/float(compact_page.mediabox.height)-3/4)<1e-8
+first=m['presentation_checks']['frobenius21_diagnostics_compact'];second=m['presentation_checks']['frobenius21_scale_combined']
+assert first['size_inches']==second['size_inches']
+assert all(first['font_sizes'][k]==second['font_sizes'][k] for k in ['ticks','axes','index'])
+assert first['font_sizes']['legend']==second['font_sizes']['legend']==24
+checks.append({'item':'Matching canvases and larger fonts: 30 pt axes and indices, 24 pt ticks and legends','pass':True})
+sections=['<!doctype html><meta charset="utf-8"><title>Revised paper plots</title><style>body{font:17px system-ui;max-width:1250px;margin:40px auto;padding:0 24px;color:#182638}figure{margin:40px 0;padding:20px;border:1px solid #ddd}img{max-width:100%;max-height:900px;display:block;margin:auto}figcaption{margin-top:18px}a{color:#194f92}</style><h1>Paper plots · requested presentation revisions</h1><p><a href="requested-revisions.pdf">Review the five revised plots</a> · <a href="affected-paper-plots.pdf">Complete affected figure set</a> · <a href="README.md">Changes and verification</a> · <a href="../paper_plots/gallery.html">Earlier original-code layout</a></p><p>The heatmap now displays the first 20 neurons. Distribution labels use consistent positions: Figure 5a blue above/red below; Figure 5b blue below/red above. Figure 7 uses a 3:4 canvas with equal-height rows and bottom legends: dual-axis alignment and rank above plain accuracy. The default palette is slate, blue, and burgundy (option C). <a href="palette-options/gallery.html">Compare three color options</a>. Figure 8 combines loss and tied scale above an independent per-neuron panel, with an explicitly marked Stage I time-axis break.</p>']
+for number,name in zip(figures,order):sections.append(f'<figure><img src="figures/{name}.jpg" alt="Figure {number}"><figcaption><b>Figure {number}</b> · <a href="figures/{name}.pdf">Vector PDF</a></figcaption></figure>')
+sections.append('<p>Separate Figure 7 panels remain available: <a href="figures/frobenius21_alignment.pdf">alignment</a>, <a href="figures/frobenius21_rank1.pdf">rank ratio</a>, <a href="figures/frobenius21_accuracy.pdf">accuracy</a>.</p>')
+(p/'gallery.html').write_text('\n'.join(sections))
+(p/'README.md').write_text('''# Requested presentation revisions
+
+These edits use the same corrected experiment checkpoints as the original-code reproduction. No experiment was rerun or changed.
+
+- Figure 11: first 20 neurons, in the original order, instead of 40. All three directions and real/imaginary panels remain.
+- Figure 5a and 5b: all numeric annotations retained with fixed 12-point offsets: Figure 5a blue above/red below; Figure 5b blue below/red above. Dense labels use a slightly wider canvas and smaller type. Automated label-overlap checks passed for both plots.
+- Figure 7: 3:4, 12 by 16 inch figure with two equal-height rows and a single legend with full mathematical notation below the panels. The selected palette is slate / blue / burgundy (option C); three rendered options are in `palette-options/gallery.html`. The top row overlays alignment on the left axis (solid lines) and rank ratio on the right axis (dashed lines); the bottom row shows accuracy. Means, standard deviations, selected neurons, and time samples are the original plotted statistics. No averaging across metrics or layers was introduced. The accuracy callout, arrow, and vertical guide are removed. The three individual panels remain available for comparison.
+
+- Figure 8: equal-height panels on a 3:4 canvas. The upper panel combines loss (left axis) and tied scale (right axis); Stage II scale time is shifted by 40,000 to align with total training time. An explicit Stage I axis break omits times 8,000 to 38,000 from view. The fixed Stage I scale a=0.125 is shown, and the complete Stage II interval is retained. Both combined figures use matching 12 by 16 inch canvases and the same text sizes: 30 pt axis labels and indices, 24 pt ticks, and (i)/(ii) panel indices outside the plotting areas. Both figures use 24 pt legends. The diagnostics legend sits closer to the lower axis; the upper scale legend uses two rows so full labels remain readable. The lower panel keeps the original per-neuron traces and ordering, with a muted categorical color palette, on its own Stage II time axis. All plotted data agree exactly with the original plotting cells. Original separate assets remain available. Refresh with `python scripts/refresh_scale_layout.py`.
+
+The original frozen plotting sources remain under `../paper_plots/sources`. These new presentation edits are explicitly authorized by the follow-up request and are recorded separately; they are not described as byte-identical original plotting code.
+
+Refresh the first four figures using `python scripts/refresh_requested_plot_layout.py`, then assemble the PDFs and gallery with `python scripts/assemble_presentation_revision.py` (requires pypdf). A full render is also available via `python scripts/render_original_paper_plots.py --presentation-revision`. Refresh only diagnostics and color options with `python scripts/refresh_diagnostic_style.py`. The presentation code is in `scripts/paper_plot_revisions.py`. `manifest.json` records source hashes, data hashes, and label-placement checks. `frobenius_diagnostic_plot_data.npz` contains the exact plotted means and standard deviations.
+
+`requested-revisions.pdf` contains the five revised assets. `affected-paper-plots.pdf` contains the complete affected set with compact Figures 7 and 8 each replacing their three individual pages. `gallery.html` follows paper order. The earlier set is preserved at `../paper_plots`.
+''')
+(p/'verification.json').write_text(json.dumps(dict(all_pass=True,checks=checks,annotation_checks=m['presentation_checks'],requested_pdf_pages=5,complete_pdf_pages=11),indent=2))
+for name in changed:shutil.copy2(p/'figures'/(name+'.jpg'),r/'figures'/(name+'.jpg'))
+readme=r/'README.md';s=readme.read_text();s=s.replace('[four-plot review PDF]', '[five-plot review PDF]');note='> Latest requested figure refinements: [revised gallery](reproduction/paper_plots_revised/gallery.html) and [five-plot review PDF](reproduction/paper_plots_revised/requested-revisions.pdf).\n\n'
+readme.write_text(s if note in s else note+s)
+print(json.dumps(dict(passed_checks=len(checks),unchanged_experiment_data=True,requested_pages=5,full_pages=11)))

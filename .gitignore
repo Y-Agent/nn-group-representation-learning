@@ -10,3 +10,9 @@ build/
 *.pt
 *.pth
 notebooks/deprecated/
+
+# Local environments and regenerated paper output
+.venv*/
+.cache/
+reproduction/new-runs/
+reproduction/paper/

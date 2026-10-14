@@ -1,0 +1,126 @@
+"""Build a reviewable gallery, vector figure booklet, and evidence manifest.
+
+Run after plotting and validation. Requires pypdf, reportlab, and Pillow.
+"""
+from pathlib import Path
+import json,hashlib,html,io,datetime,subprocess,zipfile
+from pypdf import PdfReader,PdfWriter,Transformation
+from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
+from PIL import Image
+ROOT=Path(__file__).resolve().parents[1];P=ROOT/'reproduction';F=P/'figures'
+INV=json.loads((P/'figure_inventory.json').read_text())
+assert all(z['status']=='COMPLETE' for z in INV),'All figure assets must exist before packaging'
+VAL=json.loads((P/'validation.json').read_text());PROV=json.loads((P/'figure_provenance.json').read_text())
+CAPTIONS={
+'1':'Z3 × Z5: output Fourier sparsity (first 15 neurons) and additive phase alignment; M=1,024.',
+'2':'Z3 × Z5: both input phases, their joint distribution, and conjugate-orbit counts; M=1,024.',
+'3':'Cayley graphs and spectral bases for Z12 and A4; regenerated computational illustrations.',
+'4':'Original conceptual manifold drawings, preserved unchanged; no editable generator was supplied.',
+'5':'Representation selection and mean energy: Z2 × Z3 × Z5 and S4, each M=50,000. S4 settings are newly specified.',
+'6':'Frobenius group: raw directional Fourier coefficients, first 20 neurons; M=2,048, refined run.',
+'7':'Frobenius group: full-table accuracy, signed positive alignment, and rank-one compression; M=2,048. Bars show neuron standard deviations.',
+'8':'Frobenius Stage II: direct effective coefficients, continuous transition at a=0.125, frozen positive-margin directions. Untied comparison uses multiplier M.',
+'9':'Shared-input Z3 × Z5: specialized phase-alignment and representation-competition initializations; M=16.',
+'10':'Z3 × Z5: full three-direction Fourier heatmap, first 20 neurons; M=1,024.',
+'11':'Z2 × Z3 × Z5: full Fourier heatmap, first 20 neurons, including self-conjugate frequencies; M=50,000.'}
+
+def text_page(width,height,title,note):
+    b=io.BytesIO();c=canvas.Canvas(b,pagesize=(width,height));c.setFont('Helvetica-Bold',16);c.drawString(28,height-30,title)
+    # ASCII aliases keep the PDF annotation font portable; plot fonts are embedded.
+    plain=note.replace('×','x').replace('M=','M = ')
+    c.setFont('Helvetica',9)
+    import textwrap
+    for i,line in enumerate(textwrap.wrap(plain,145)):c.drawString(28,height-48-i*12,line)
+    c.save();b.seek(0);return PdfReader(b).pages[0]
+
+def image_page(path):
+    im=Image.open(path);w,h=im.size;b=io.BytesIO();c=canvas.Canvas(b,pagesize=(w,h));c.drawImage(ImageReader(im),0,0,w,h);c.save();b.seek(0);return PdfReader(b).pages[0]
+
+book=PdfWriter();groups={}
+for row in INV:groups.setdefault(row['figure'],[]).append(row)
+for fig,rows in groups.items():
+    n=len(rows);columns=2 if fig in ['1','3','4','5','9'] else 3 if fig in ['7','8'] else 1
+    pages=[image_page(F/(r['asset']+'.jpeg')) if fig=='4' else PdfReader(F/(r['asset']+'.pdf')).pages[0] for r in rows]
+    width=1100.;cellw=(width-56-(columns-1)*16)/columns
+    ratios=[float(p.mediabox.height)/float(p.mediabox.width) for p in pages]
+    cellh=min(470,max(ratios)*cellw);nrows=(n+columns-1)//columns;height=90+nrows*(cellh+24)
+    out=text_page(width,height,'Figure '+fig+' | Corrected paper reproduction',CAPTIONS[fig])
+    for i,p in enumerate(pages):
+        pw,ph=float(p.mediabox.width),float(p.mediabox.height);scale=min(cellw/pw,cellh/ph);col,row=i%columns,i//columns
+        x=28+col*(cellw+16)+(cellw-pw*scale)/2;y=height-80-row*(cellh+24)-cellh+(cellh-ph*scale)/2
+        out.merge_transformed_page(p,Transformation().scale(scale).translate(x,y))
+    writer=PdfWriter();writer.add_page(out)
+    with (F/f'figure-{int(fig):02d}.pdf').open('wb') as f:writer.write(f)
+    book.add_page(out)
+with (P/'all-paper-figures.pdf').open('wb') as f:book.write(f)
+
+main=['f21_wide_h2','z15','z30','s4'];summaries=[]
+for run in main:
+    r=P/'runs'/run;cfg=json.loads((r/'config.json').read_text());h=json.loads((r/'history.json').read_text());v=h[-1]
+    summaries.append(dict(run=run,width=cfg['width'],steps=v['step'],time=v['time'],accuracy=v['accuracy'],minimum_margin=v['min_margin'],signed_alignment_mean=v['signed_mean'],concentration_mean=v['concentration_mean'],concentration_min=v['concentration_min'],rank_highdim_mean=v['rank_highdim_mean'],max_norm_error=max(x['max_norm_error'] for x in h)))
+scale=json.loads((P/'frobenius21_scale_summary.json').read_text());ref=json.loads((P/'runs/f21/history.json').read_text())[-1]
+checks_fail=[z for z in VAL['checks'] if z['status']=='FAIL']
+lines=['# Corrected group-composition reproduction','',f'Generated {datetime.datetime.now(datetime.timezone.utc).isoformat()}.', '',
+'All 23 source assets across Figures 1–11 are present: 17 regenerated experimental assets, four regenerated computational illustrations, and two unchanged conceptual drawings. The linked per-panel PDFs/SVGs retain vector plot content. The combined booklet arranges the panels for review.', '',
+'[Browse all figures](gallery.html) · [Download the 11-figure PDF](all-paper-figures.pdf) · [Implementation protocol](../REPRODUCTION.md) · [Validation records](validation.json) · [Source archive](reproduction-source.zip)', '',
+'## Main corrected runs','', '| Run | Neurons | Final time | Accuracy | Minimum margin | Mean positive alignment (minimum over relations) | Mean concentration (minimum over directions) |', '|---|---:|---:|---:|---:|---:|---:|']
+for r in summaries:lines.append(f"| {r['run']} | {r['width']:,} | {r['time']:g} | {100*r['accuracy']:.4f}% | {r['minimum_margin']:.6g} | {min(r['signed_alignment_mean']):.9f} | {min(r['concentration_mean']):.9f} |")
+lines += ['', 'The Frobenius width was increased from 512 to 2,048 at the user’s request. Both widths use seed 42. The 512-neuron reference finishes at 440/441 accuracy; its complete trajectory and separate reference plots remain available. The main widened trajectory uses the refined time step and is the source for Figures 6–8. Perfect finite-table accuracy is evidence about these runs, not a proof of the population theorem.', '',
+'## Stage II','', '| Variant | Final mean CE | Final accuracy | Initial a | Final mean a |', '|---|---:|---:|---:|---:|']
+for name,v in scale['variants'].items():lines.append(f"| {name} | {v['final_mean_ce']:.7g} | {100*v['final_accuracy']:.4f}% | {v['initial_a']:g} | {v['final_a_mean']:.6g} |")
+lines += ['', 'All variants freeze the same refined Stage-I directions. The tied scalar and the Figure-8 untied variant use their stated clocks; the latter multiplies independent coefficient gradients by M. The slower unmultiplied independent flow is also retained for Section 2. No scale clipping is used.', '',
+'## What was corrected','',
+'- Independent unit-sphere initialization and tangent projection for each input direction, with raw-weight diagnostics.',
+'- Full-table summed cross-entropy; physical time equals updates times the step size. Mean loss is explicitly divided by the number of input pairs.',
+'- Projected Euler SGD instead of Adam, including the half-rate shared-input update from Section 5.',
+'- Direct Stage-II coefficients with exact logit continuity at effective a=0.125, rather than a discontinuous initialization or factorized scale optimization.',
+'- Signed alignment plus the original unsigned diagnostic, explicit zero-block handling, and rank-one statistics restricted to higher-dimensional irreps.',
+'- Figure-by-figure source mapping, fixed neuron selections, complete histories, source hashes, and equal-horizon step-halving checks.', '',
+'## Validation and limits','',f"Implementation/numerical checks: {len(VAL['checks'])-len(checks_fail)} PASS, {len(checks_fail)} FAIL. See the machine-readable validation for every criterion and measured value. The CPU log records 22 passing tests, including exact blocked-gradient agreement with autograd.", '',
+'Step halving leaves all main classifier accuracies unchanged. The largest per-orbit fraction change is 0.00004. Twelve of 50,000 Z30 neurons and five of 50,000 S4 neurons change their selected orbit; individual basin assignments are therefore not uniformly stable, although the ensemble plots are stable. The full coordinate and coefficient differences are recorded in step_size_comparison.json. All 207 downloaded run files match their remote SHA-256 hashes in transfer_verification.json.', '',
+'The public checkout did not supply the original Figure-5b generator and settings (its deprecated S4 notebook uses shared inputs); its new explicit configuration follows the paper’s model and training flow. Figure 4 remains original conceptual artwork. The paper’s original unsigned alignment cannot establish positive proportionality, so the main corrected alignment plot is signed and the unsigned plot is supplied separately. Plot captions need to reflect these changes, the wider Frobenius network, and the new numerical horizons before incorporation into the manuscript.', '',
+'Finite-time concentration and rank-one limits are quantified in validation.json; small residual modes are not declared mathematically zero. The width-16 specialized experiments isolate phase and competition dynamics and are not full-classification demonstrations. The final statement about scale growth is a finite-time observation; asymptotic logarithmic growth is not proven by a curve alone.', '',
+'## Artifacts','',
+'- `runs/`: initial/final arrays, checkpoints, complete histories, configurations, environment records, and code hashes.',
+'- `figures/`: individual PDF/SVG/JPG assets, assembled figure PDFs, supplementary diagnostics, and distribution arrays.',
+'- `step_size_comparison.json`: equal-horizon refinement differences for directions, classifications, representation counts, and Stage-II coefficients.',
+'- `figure_inventory.json` and `figure_provenance.json`: paper-to-output mapping, source runs, and file hashes.',
+'- `logs/`: CPU test and training logs; `requirements-lock-cpu.txt`: exact remote environment.', '']
+if checks_fail:lines+=['Unresolved failed checks:']+[f"- {z['check']}: {z['value']}" for z in checks_fail]
+if (P/'compute_status.json').exists():
+    compute=json.loads((P/'compute_status.json').read_text())
+    lines+=['','## Compute lifecycle','',compute['summary'],'']
+(P/'REPORT.md').write_text('\n'.join(lines))
+style='body{font:16px system-ui;max-width:1400px;margin:40px auto;padding:0 24px;color:#14283c;background:#f6f8fb}h1{font-size:32px}section{background:white;padding:24px;margin:24px 0;border-radius:10px;border:1px solid #dde4ed}img{max-width:100%;height:auto}a{color:#175ca0}.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(390px,1fr));gap:24px}figure{margin:0}figcaption{font-size:13px;margin:12px 0}table{border-collapse:collapse}td,th{padding:10px;border-bottom:1px solid #dde4ed;text-align:right}p{line-height:1.55}.note{color:#485c70}'
+page=['<!doctype html><html><head><meta charset="utf-8"><title>Corrected group-composition reproduction</title><style>'+style+'</style></head><body>', '<h1>Corrected group-composition reproduction</h1>', '<p>Figures 1–11, generated from corrected projected-gradient experiments on a dedicated Nebius CPU pod. Frobenius uses 2,048 neurons; the 512-neuron reference remains available.</p>', '<p><a href="all-paper-figures.pdf">All figures (PDF)</a> · <a href="REPORT.md">Full report</a> · <a href="validation.json">Validation</a> · <a href="step_size_comparison.json">Step-size comparisons</a></p>', '<table><tr><th>Run</th><th>Neurons</th><th>Accuracy</th><th>Minimum margin</th></tr>']
+for r in summaries:page.append(f"<tr><td>{r['run']}</td><td>{r['width']:,}</td><td>{r['accuracy']:.6f}</td><td>{r['minimum_margin']:.6g}</td></tr>")
+page.append('</table>')
+for fig,rows in groups.items():
+    page.append(f'<section><h2>Figure {fig}</h2><p>{html.escape(CAPTIONS[fig])}</p><p><a href="figures/figure-{int(fig):02d}.pdf">Assembled figure PDF</a></p><div class="panels">')
+    for r in rows:
+        asset=r['asset'];ext='jpeg' if fig=='4' else 'jpg';source=', '.join(PROV.get(asset,{}).get('runs',[])) or r['kind']
+        links=' · '.join(f'<a href="figures/{asset}.{e}">{e.upper()}</a>' for e in (['jpeg'] if fig=='4' else ['pdf','svg','jpg']))
+        page.append(f'<figure><img loading="lazy" src="figures/{asset}.{ext}" alt="{html.escape(asset)}"><figcaption>{html.escape(asset)}<br>Source: {html.escape(source)}<br>{links}</figcaption></figure>')
+    page.append('</div></section>')
+page.append('<section><h2>Supplementary evidence</h2><p>Full histories include all recorded times. Reference-width figures and the original unsigned alignment are retained below.</p><div class="panels">')
+for name in ['frobenius21_margin','frobenius21_concentration','frobenius21_alignment_unsigned','frobenius21_positive_ray','frobenius21_rank1_all_irreps','frobenius21_reference512_accuracy','frobenius21_reference512_margin','f21_wide_step_check','z15_step_check','z30_step_check','s4_step_check','frobenius21_scale_section2','frobenius21_scale_growth_diagnostics','f21_before_after','z15_before_after']:
+    if (F/(name+'.jpg')).exists():page.append(f'<figure><img loading="lazy" src="figures/{name}.jpg" alt="{name}"><figcaption><a href="figures/{name}.pdf">{name}</a></figcaption></figure>')
+page.append('</div></section></body></html>');(P/'gallery.html').write_text('\n'.join(page))
+files=list(ROOT.glob('src/**/*.py'))+list(ROOT.glob('scripts/*.py'))+list(ROOT.glob('tests/*.py'))+list((P/'runs').glob('*/config.json'))+list((P/'runs').glob('*/history.json'))+list((P/'runs').glob('*/final.npz'))
+manifest=dict(upstream_commit='c6fb3095a92e4c29eda0741933d547cb1b971eb5',generated_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),cpu_cluster='group-composition-cpu',cpu_pod='group-composition-cpu-2099a7dc-head',gpu_count=0,main_results=summaries,files_sha256={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in files})
+(P/'manifest.json').write_text(json.dumps(manifest,indent=2));print(json.dumps(dict(figures=len(groups),assets=len(INV),validation_failures=len(checks_fail))))
+
+# Self-contained source package and an applyable patch against the recorded base.
+tracked=subprocess.check_output(['git','ls-files'],cwd=ROOT,text=True).splitlines()
+new=[*ROOT.glob('src/*.py'),*ROOT.glob('scripts/*.py'),*ROOT.glob('scripts/*.sh'),*ROOT.glob('tests/*.py'),ROOT/'REPRODUCTION.md',*ROOT.glob('reproduction-*.yaml'),P/'configs.json',P/'requirements-lock-cpu.txt',P/'conceptual_provenance.json',P/'manuscript_hashes.json',*F.glob('center-stable-manifold.*.jpeg')]
+source=sorted(set([Path(n) for n in tracked if Path(n).suffix in ['.py','.yaml','.yml','.md','.txt','.ipynb'] and 'deprecated' not in Path(n).parts]+[p.relative_to(ROOT) for p in new]))
+diff=subprocess.check_output(['git','diff','--binary'],cwd=ROOT)
+for name in source:
+    if str(name) not in tracked:
+        q=subprocess.run(['git','diff','--no-index','--binary','--','/dev/null',str(name)],cwd=ROOT,stdout=subprocess.PIPE)
+        assert q.returncode in [0,1]
+        diff+=q.stdout
+(P/'implementation.patch').write_bytes(diff)
+with zipfile.ZipFile(P/'reproduction-source.zip','w',zipfile.ZIP_DEFLATED) as z:
+    for name in source:z.write(ROOT/name,str(name))

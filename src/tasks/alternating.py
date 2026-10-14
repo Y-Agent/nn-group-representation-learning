@@ -6,10 +6,11 @@ The group A_n has n!/2 elements. The operation is composition of permutations.
 A_n is a normal subgroup of S_n consisting of all permutations with sign +1.
 """
 
-from typing import Tuple, List
-import torch
 from itertools import permutations
 from math import factorial
+from typing import List, Tuple
+
+import torch
 
 from .base import Task
 
@@ -53,7 +54,7 @@ class AlternatingGroupMultiplication(Task):
         if n < 3:
             raise ValueError(f"n must be at least 3 for non-trivial A_n, got {n}")
         if n > 5:
-            raise ValueError(f"n > 5 not yet supported (A_6 has 360 elements)")
+            raise ValueError("n > 5 not yet supported (A_6 has 360 elements)")
 
         self.n = n
         self._vocab_size = factorial(n) // 2
@@ -64,8 +65,9 @@ class AlternatingGroupMultiplication(Task):
         ]
 
         # Verify count
-        assert len(self._perms) == self._vocab_size, \
+        assert len(self._perms) == self._vocab_size, (
             f"Expected {self._vocab_size} even permutations, got {len(self._perms)}"
+        )
 
         # Create lookup table: perm tuple -> index
         self._perm_to_idx = {p: i for i, p in enumerate(self._perms)}
@@ -122,14 +124,12 @@ class AlternatingGroupMultiplication(Task):
         """Generate all (σ, τ) pairs and their composition labels."""
         N = self._vocab_size
         data = torch.tensor(
-            [(i, j) for i in range(N) for j in range(N)],
-            dtype=torch.long,
-            device=device
+            [(i, j) for i in range(N) for j in range(N)], dtype=torch.long, device=device
         )
         labels = torch.tensor(
             [self.compute_label(i, j) for i in range(N) for j in range(N)],
             dtype=torch.long,
-            device=device
+            device=device,
         )
         return data, labels
 

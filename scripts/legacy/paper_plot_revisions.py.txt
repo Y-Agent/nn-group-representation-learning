@@ -1,0 +1,109 @@
+"""User-requested presentation edits; experiment arrays and metrics are unchanged."""
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.text import Annotation
+from matplotlib.path import Path
+from matplotlib.transforms import Bbox
+
+
+def fix_distribution_labels(fig):
+    """Fixed side and offset per series, as requested for the two distributions."""
+    axes=fig.axes[:2]
+    dense=len(axes[0].lines[0].get_xdata())>8
+    fig.set_size_inches(11.8,5.9)
+    fig.set_dpi(150)
+    offsets=[12,-12] if dense else [-12,12]  # Blue, red.
+    labels=[];choices=[]
+    for axis,ax in enumerate(axes):
+        for text in ax.texts:
+            if not isinstance(text,Annotation):continue
+            dy=offsets[axis]
+            text.set_fontsize(14 if dense else 18)
+            text.set_clip_on(False);text.set_position((0,dy))
+            text.set_bbox(dict(facecolor='white',edgecolor='none',pad=.4))
+            text.set_ha('center');text.set_va('bottom' if dy>0 else 'top')
+            labels.append(text)
+            choices.append(dict(text=text.get_text(),offset_points=[0,dy],horizontal_alignment='center',axis=axis))
+        ax.tick_params(axis='y',labelsize=18)
+    axes[0].tick_params(axis='x',labelsize=16,pad=6)
+    for text in axes[0].get_xticklabels():
+        text.set_rotation(90 if dense else 0)
+        text.set_ha('right' if dense else 'center')
+    for text in axes[0].get_legend().get_texts():text.set_fontsize(22)
+    fig.subplots_adjust(left=.09,right=.90,bottom=.27,top=.96)
+    fig.canvas.draw();renderer=fig.canvas.get_renderer()
+    boxes=[text.get_window_extent(renderer).expanded(1.04,1.08) for text in labels]
+    overlap=int(sum(a.overlaps(b) for i,a in enumerate(boxes) for b in boxes[i+1:]))
+    assert overlap==0,overlap
+    for text,box in zip(labels,boxes):
+        bounds=text.axes.get_window_extent(renderer)
+        assert bounds.contains(box.x0,box.y0) and bounds.contains(box.x1,box.y1),(text.get_text(),box.bounds,bounds.bounds)
+    return dict(size_inches=[11.8,5.9],axes_bounds=list(axes[0].get_position().bounds),
+                numeric_labels=len(labels),label_overlaps=overlap,placements=choices,
+                consistent_offsets=True,blue_position='above' if dense else 'below',
+                red_position='below' if dense else 'above')
+
+
+DIAGNOSTIC_PALETTES = {
+    "navy_teal_ochre": ("Navy / teal / ochre", ["#263D5A", "#368A87", "#B17B35"]),
+    "blue_orange_green": ("Blue / orange / green", ["#35689A", "#CE7937", "#4D8B64"]),
+    "slate_blue_burgundy": ("Slate / blue / burgundy", ["#6C7785", "#477DA5", "#914F63"]),
+}
+
+def compact_diagnostics(env, palette="slate_blue_burgundy"):
+    """3:4 canvas with equal-height panels and both legends at the bottom."""
+    from matplotlib.lines import Line2D
+    # Match the font embedded by the CPU renderer, including on local refreshes.
+    plt.rcParams['font.serif']=['DejaVu Serif']
+    t=np.asarray(env['time_arr']);palette_name,colors=DIAGNOSTIC_PALETTES[palette]
+    fig,axes=plt.subplots(2,1,figsize=(12,16),sharex=True,
+                          gridspec_kw={'height_ratios':[1,1],'hspace':.1019148058})
+    right=axes[0].twinx()
+    means=[env['cond2_mean'],env['cond3_mean'],env['cond1_mean']]
+    stds=[env['cond2_std'],env['cond3_std'],env['cond1_std']]
+    rankmeans=[env['theta1_sv_mean'],env['theta2_sv_mean'],env['xi_sv_mean']]
+    rankstds=[env['theta1_sv_std'],env['theta2_sv_std'],env['xi_sv_std']]
+    labels=[r'$\widehat{\theta^1_m}[\rho_m]$',r'$\widehat{\theta^2_m}[\rho_m]$',r'$\widehat{\xi_m}[\rho_m]$']
+    cadence=max(1,len(t)//20)
+    for ax,mus,sds,style in [(axes[0],means,stds,'-'),(right,rankmeans,rankstds,'--')]:
+        for i,(mu,sd) in enumerate(zip(mus,sds)):
+            ax.errorbar(t,mu,yerr=sd,color=colors[i],linestyle=style,
+                        linewidth=1.7,marker=['o','s','^'][i],markersize=4,
+                        markerfacecolor='none',markevery=cadence,errorevery=cadence,
+                        capsize=2,elinewidth=.8,label=labels[i])
+        ax.tick_params(labelsize=24)
+    axes[0].grid(True,alpha=.22)
+    axes[0].set_ylabel('Avg. alignment',fontsize=30);axes[0].set_ylim(0,1.06)
+    rank_upper=max(float(np.max(np.asarray(mu)+np.asarray(sd))) for mu,sd in zip(rankmeans,rankstds))*1.08
+    right.set_ylabel(r'Avg. $\sigma_{(2)} / \sigma_{(1)}$',fontsize=30,labelpad=9)
+    right.set_ylim(0,rank_upper)
+    accuracy=np.asarray(env['acc_arr']);ta=np.asarray(env['time_acc'])
+    axes[1].plot(ta,accuracy,color=colors[0],linewidth=1.8)
+    axes[1].set_ylabel('Accuracy',fontsize=30);axes[1].set_yticks([0,.5,1]);axes[1].set_ylim(-.04,1.08)
+    axes[1].set_xlabel('Time',fontsize=30);axes[1].grid(True,alpha=.22)
+    axes[1].tick_params(labelsize=24)
+    axes[1].set_xlim(-.0125*float(t[-1]),1.0125*float(t[-1]))
+    handles=[Line2D([],[],color=colors[i],marker=['o','s','^'][i],linestyle='none',
+                    markerfacecolor='none',markersize=6,label=labels[i]) for i in range(3)]
+    metric_handles=[Line2D([],[],color='#444444',linestyle='-',linewidth=1.8,label='Alignment'),
+                    Line2D([],[],color='#444444',linestyle='--',linewidth=1.8,label='Rank ratio')]
+    fig.legend(handles=handles+metric_handles,loc='upper center',bbox_to_anchor=(.5,.084375),ncol=5,
+               frameon=False,fontsize=24,handlelength=.9,columnspacing=.4,handletextpad=.25)
+    fig.subplots_adjust(left=.15,right=.85,bottom=.1321875,top=.9578125)
+    axes[1].set_xticks([0,10000,20000,30000,40000])
+    for i,ax in enumerate(axes):
+        ax.text(0,1.025,['(i)','(ii)'][i],transform=ax.transAxes,fontsize=30,va='bottom')
+    arrays=dict(time=t,accuracy_time=ta,accuracy=accuracy,alignment_mean=np.asarray(means),
+                alignment_std=np.asarray(stds),rank_mean=np.asarray(rankmeans),rank_std=np.asarray(rankstds))
+    fig.canvas.draw()
+    heights=[float(ax.get_position().height) for ax in axes]
+    assert np.isclose(*heights)
+    renderer=fig.canvas.get_renderer()
+    legend_boxes=[legend.get_window_extent(renderer) for legend in fig.legends]
+    assert len(legend_boxes)==1
+    assert legend_boxes[0].x0>=0 and legend_boxes[0].x1<=fig.bbox.x1
+    assert all(b.y1 < axes[1].xaxis.label.get_window_extent(renderer).y0 for b in legend_boxes)
+    return fig,arrays,dict(layout='3:4, equal-height rows; alignment left axis and rank ratio right axis above accuracy',
+                          size_inches=[12,16],row_height_ratio=[1,1],axes_heights=heights,
+                          legend_position='Single line at bottom',font_sizes=dict(ticks=24,axes=30,legend=24,index=30),panel_indices=['(i)','(ii)'],palette=palette_name,palette_hex=colors,accuracy_annotation=False,accuracy_guide=False,
+                          metrics_aggregated_together=False,error_bars='Original per-layer standard deviations')

@@ -1,0 +1,65 @@
+"""Render the original distribution cells on matching, uncropped canvases."""
+from pathlib import Path
+from types import SimpleNamespace
+import sys, json, hashlib
+import numpy as np
+import torch
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+from paper_plot_revisions import fix_distribution_labels
+
+ROOT = Path(__file__).resolve().parents[1]
+BASE = ROOT/'reproduction/paper_plots'
+OUT = ROOT/'reproduction/paper_plots_revised'
+RUNS = ROOT/'reproduction/runs'
+sys.path.insert(0, str(BASE/'sources/runtime'))
+from src.basis import FourierBasis
+torch.set_num_threads(2)
+if not hasattr(cm, 'get_cmap'): cm.get_cmap = plt.get_cmap
+manifest = json.loads((OUT/'manifest.json').read_text())
+cells = json.loads((BASE/'sources/modular_addition_unshared.json').read_text())
+env = {}
+exec(cells['1'], env)
+for suffix in ['final', 'initial']:
+    name = f'z30_h2/{suffix}.npz'
+    assert hashlib.sha256((RUNS/name).read_bytes()).hexdigest() == manifest['source_data_hashes'][name]
+with np.load(RUNS/'z30_h2/final.npz') as data:
+    wi = torch.from_numpy(data['W_in'].copy()); wo = torch.from_numpy(data['W_out'].copy())
+env.update(config=SimpleNamespace(d_vocab=30), trainer=SimpleNamespace(
+    model=SimpleNamespace(W_in=wi, W_out=wo), basis=FourierBasis([2,3,5])), M=len(wi))
+with np.load(RUNS/'z30_h2/initial.npz') as data:
+    env['W_in_init'] = torch.from_numpy(data['W_in'].copy())
+    env['W_out_init'] = torch.from_numpy(data['W_out'].copy())
+exec(cells['9'], env)
+current = ''
+reports = {}
+
+def save(*args, **kwargs):
+    fig = plt.gcf()
+    before = [(line.get_xdata().copy(), line.get_ydata().copy()) for ax in fig.axes for line in ax.lines]
+    reports[current] = fix_distribution_labels(fig)
+    after = [(line.get_xdata(), line.get_ydata()) for ax in fig.axes for line in ax.lines]
+    assert all(np.array_equal(x, xx) and np.array_equal(y, yy) for (x,y),(xx,yy) in zip(before,after))
+    for ext in ['jpg', 'pdf']:
+        path = OUT/'figures'/f'{current}.{ext}'
+        fig.savefig(path, dpi=300, bbox_inches=None)
+        manifest['figure_hashes'][path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
+    reports[current]['scientific_traces_unchanged'] = True
+
+plt.savefig = save
+plt.show = lambda *args, **kwargs: plt.close('all')
+current = 'modular_addition_freq_distribution'
+exec(cells['15'], env)
+current = 'symmetric_group_irrep_distribution'
+env['freq_group_data'] = [tuple(x) for x in manifest['data_adapter']['s4']['categories']]
+exec(cells['15'][cells['15'].index('# Sort by proportion (ascending order)'):], env)
+assert len({tuple(r['axes_bounds']) for r in reports.values()}) == 1
+manifest['presentation_checks'].update(reports)
+manifest.setdefault('presentation_script_hashes', {}).update({
+    p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+    for p in [Path(__file__), ROOT/'scripts/paper_plot_revisions.py']})
+(OUT/'manifest.json').write_text(json.dumps(manifest, indent=2))
+(OUT/'distribution-layout-verification.json').write_text(json.dumps(reports, indent=2))
+print('Verified matching canvases and axes; numeric labels do not overlap; scientific traces unchanged.')

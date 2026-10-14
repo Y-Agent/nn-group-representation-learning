@@ -58,11 +58,11 @@ where ν̂[ρ] = (1/|G|) Σ_g ν(g) ρ(g⁻¹) is the paper's DFT definition.
 Equivalently: ν̂[ρ] = C[ρ] / √(|G| · d_ρ)
 """
 
-from typing import List, Dict, Tuple
-import torch
-import numpy as np
 import cmath
-from math import sqrt
+from typing import Dict, List, Tuple
+
+import numpy as np
+import torch
 
 from .base import Basis
 
@@ -96,7 +96,7 @@ class Frobenius21Basis(Basis):
         # 2^0 = 1, 2^1 = 2, 2^2 = 4 (mod 7)
         self._a_values = [1, 2, 4]
         self._a_to_k = {1: 0, 2: 1, 4: 2}  # a = 2^k mod 7
-        self._a_inv = {1: 1, 2: 4, 4: 2}   # modular inverse
+        self._a_inv = {1: 1, 2: 4, 4: 2}  # modular inverse
 
         # Generate all elements
         self._elements: List[Tuple[int, int]] = []
@@ -108,14 +108,8 @@ class Frobenius21Basis(Basis):
 
         # Build irrep information
         # Order: triv, rho_1, rho_3, rho_3^vee, rho_1^vee
-        self._irrep_labels = ['trivial', 'omega', 'rho_3', 'rho_3_conj', 'omega_conj']
-        self._irrep_dims = {
-            'trivial': 1,
-            'omega': 1,
-            'omega_conj': 1,
-            'rho_3': 3,
-            'rho_3_conj': 3
-        }
+        self._irrep_labels = ["trivial", "omega", "rho_3", "rho_3_conj", "omega_conj"]
+        self._irrep_dims = {"trivial": 1, "omega": 1, "omega_conj": 1, "rho_3": 3, "rho_3_conj": 3}
 
         # Build all representations
         self._irreps = self._build_representations()
@@ -145,21 +139,21 @@ class Frobenius21Basis(Basis):
 
         # Roots of unity
         omega = cmath.exp(2j * cmath.pi / 3)  # primitive 3rd root
-        zeta = cmath.exp(2j * cmath.pi / 7)   # primitive 7th root
+        zeta = cmath.exp(2j * cmath.pi / 7)  # primitive 7th root
 
         # ===== 1D representations =====
 
         # Trivial representation
-        irreps['trivial'] = {g: np.array([[1.0 + 0j]]) for g in self._elements}
+        irreps["trivial"] = {g: np.array([[1.0 + 0j]]) for g in self._elements}
 
         # Omega representation: (a, b) → ω^k where a = 2^k
-        irreps['omega'] = {}
-        irreps['omega_conj'] = {}
+        irreps["omega"] = {}
+        irreps["omega_conj"] = {}
         for g in self._elements:
             a, b = g
             k = self._a_to_k[a]
-            irreps['omega'][g] = np.array([[omega ** k]])
-            irreps['omega_conj'][g] = np.array([[omega ** (-k)]])
+            irreps["omega"][g] = np.array([[omega**k]])
+            irreps["omega_conj"][g] = np.array([[omega ** (-k)]])
 
         # ===== 3D representations =====
         # Generators: x = (1, 1), y = (2, 0)
@@ -173,36 +167,31 @@ class Frobenius21Basis(Basis):
         # ρ(y) = permutation matrix for cycle (1 2 3)
 
         # Generator matrices for rho_3
-        rho_x = np.diag([zeta, zeta**4, zeta**2])
-        rho_y = np.array([
-            [0, 0, 1],
-            [1, 0, 0],
-            [0, 1, 0]
-        ], dtype=complex)
+        rho_y = np.array([[0, 0, 1], [1, 0, 0], [0, 1, 0]], dtype=complex)
 
         # Build all 21 matrices by expressing each element in terms of generators
         # (a, b) = x^b · y^k where a = 2^k
         # Verification: x^b · y^k = (1, b) · (2^k, 0) = (2^k, b)
         # This decomposition gives a homomorphism: ρ(g·h) = ρ(g)·ρ(h)
-        irreps['rho_3'] = {}
-        irreps['rho_3_conj'] = {}
+        irreps["rho_3"] = {}
+        irreps["rho_3_conj"] = {}
 
         for g in self._elements:
             a, b = g
             k = self._a_to_k[a]
 
             # ρ(x^b) = ρ(x)^b = diag(ζ^b, ζ^(4b), ζ^(2b))
-            rho_xb = np.diag([zeta**b, zeta**(4*b), zeta**(2*b)])
+            rho_xb = np.diag([zeta**b, zeta ** (4 * b), zeta ** (2 * b)])
 
             # ρ(y^k) = ρ(y)^k
             rho_yk = np.linalg.matrix_power(rho_y, k)
 
             # ρ(a, b) = ρ(x^b) · ρ(y^k)
             rho_g = rho_xb @ rho_yk
-            irreps['rho_3'][g] = rho_g
+            irreps["rho_3"][g] = rho_g
 
             # Conjugate representation
-            irreps['rho_3_conj'][g] = rho_g.conj()
+            irreps["rho_3_conj"][g] = rho_g.conj()
 
         # Verify the group homomorphism property for a few elements
         self._verify_homomorphism(irreps)
@@ -219,7 +208,7 @@ class Frobenius21Basis(Basis):
             ((4, 2), (2, 6)),
         ]
 
-        for label in ['rho_3', 'rho_3_conj']:
+        for label in ["rho_3", "rho_3_conj"]:
             for g, h in test_pairs:
                 gh = self._multiply(g, h)
                 product = irreps[label][g] @ irreps[label][h]
@@ -258,7 +247,7 @@ class Frobenius21Basis(Basis):
             dim = self._irrep_dims[label]
             for i in range(dim):
                 for j in range(dim):
-                    names.append(f"ρ_{label}({i+1},{j+1})")
+                    names.append(f"ρ_{label}({i + 1},{j + 1})")
         return names
 
     def get_basis_matrix(self, device: torch.device = None) -> torch.Tensor:
@@ -277,7 +266,7 @@ class Frobenius21Basis(Basis):
             Complex tensor of shape (|G|, |G|) where rows are basis functions.
         """
         if device is None:
-            device = torch.device('cpu')
+            device = torch.device("cpu")
 
         device_key = str(device)
         if device_key in self._basis_cache:
@@ -316,8 +305,7 @@ class Frobenius21Basis(Basis):
             Reshape ρ-block to d×d matrix C[ρ], then ν̂[ρ] = C[ρ] / √(|G|·d_ρ).
         """
         basis = self.get_basis_matrix(signal.device)
-        if not signal.is_complex():
-            signal = signal.to(torch.complex128)
+        signal = signal.to(basis.dtype)
         return signal @ basis.T.conj()
 
     def transform_paper(self, signal: torch.Tensor) -> torch.Tensor:
@@ -346,7 +334,7 @@ class Frobenius21Basis(Basis):
             d = self._irrep_dims[label]
             block_size = d * d
             scale = np.sqrt(N * d)
-            nu_hat[..., curr_idx:curr_idx + block_size] /= scale
+            nu_hat[..., curr_idx : curr_idx + block_size] /= scale
             curr_idx += block_size
 
         return nu_hat
@@ -363,7 +351,7 @@ class Frobenius21Basis(Basis):
             Complex tensor of shape (..., |G|)
         """
         basis = self.get_basis_matrix(coeffs.device)
-        return coeffs @ basis
+        return coeffs.to(basis.dtype) @ basis
 
     def get_irrep_block_indices(self, label: str) -> Tuple[int, int]:
         """Get the start and end indices for an irrep block in the basis."""
@@ -390,7 +378,7 @@ class Frobenius21Basis(Basis):
                 local_idx = idx - curr_idx
                 i = local_idx // dim
                 j = local_idx % dim
-                return f"{label}({i+1},{j+1})"
+                return f"{label}({i + 1},{j + 1})"
             curr_idx += block_size
         return f"idx={idx}"
 
@@ -449,7 +437,7 @@ class Frobenius21Basis(Basis):
         for label in self._irrep_labels:
             start, end = self.get_irrep_block_indices(label)
             for k in range(start, end):
-                norm_sq = np.sum(np.abs(B[k, :])**2)
+                norm_sq = np.sum(np.abs(B[k, :]) ** 2)
                 err = abs(norm_sq - 1.0)
                 max_norm_err = max(max_norm_err, err)
                 if err > 1e-12:

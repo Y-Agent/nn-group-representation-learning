@@ -5,10 +5,11 @@ Group multiplication on the symmetric group S_n (permutations of n elements).
 The group S_n has n! elements. The operation is composition of permutations.
 """
 
-from typing import Tuple, List
-import torch
 from itertools import permutations
 from math import factorial
+from typing import List, Tuple
+
+import torch
 
 from .base import Task
 
@@ -37,7 +38,9 @@ class SymmetricGroupMultiplication(Task):
         if n < 2:
             raise ValueError(f"n must be at least 2, got {n}")
         if n > 4:
-            raise ValueError(f"n > 4 not yet supported (S_5 has 120 elements, basis implementation is complex)")
+            raise ValueError(
+                "n > 4 not yet supported (S_5 has 120 elements, basis implementation is complex)"
+            )
 
         self.n = n
         self._vocab_size = factorial(n)
@@ -113,14 +116,12 @@ class SymmetricGroupMultiplication(Task):
         """Generate all (σ, τ) pairs and their composition labels."""
         N = self._vocab_size
         data = torch.tensor(
-            [(i, j) for i in range(N) for j in range(N)],
-            dtype=torch.long,
-            device=device
+            [(i, j) for i in range(N) for j in range(N)], dtype=torch.long, device=device
         )
         labels = torch.tensor(
             [self.compute_label(i, j) for i in range(N) for j in range(N)],
             dtype=torch.long,
-            device=device
+            device=device,
         )
         return data, labels
 

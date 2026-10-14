@@ -13,11 +13,12 @@ DFT convention:
 For abelian groups, all irreps are 1D characters, so no (i,j) indexing needed.
 """
 
-from typing import List, Union, Tuple
-import torch
-import numpy as np
 from functools import reduce
 from operator import mul
+from typing import List, Tuple, Union
+
+import numpy as np
+import torch
 
 from .base import Basis
 
@@ -50,6 +51,9 @@ class FourierBasis(Basis):
             self.n = [n]
         else:
             self.n = list(n)
+
+        if not self.n or any(not isinstance(n, int) or n <= 0 for n in self.n):
+            raise ValueError("Moduli must be positive integers")
 
         self.d = len(self.n)
         self._size = reduce(mul, self.n, 1)
@@ -117,11 +121,12 @@ class FourierBasis(Basis):
 
     def _compute_character(self, k_tuple: Tuple[int, ...], x_tuple: Tuple[int, ...]) -> complex:
         """Compute χ_k(x) = ∏_j exp(i 2π k_j x_j / n_j)."""
-        phase = sum(2 * np.pi * k_j * x_j / n_j
-                   for k_j, x_j, n_j in zip(k_tuple, x_tuple, self.n))
+        phase = sum(2 * np.pi * k_j * x_j / n_j for k_j, x_j, n_j in zip(k_tuple, x_tuple, self.n))
         return np.exp(1j * phase)
 
-    def get_basis_matrix(self, device: torch.device = None) -> torch.Tensor:
+    def get_basis_matrix(
+        self, device: torch.device = None, dtype: torch.dtype = torch.complex64
+    ) -> torch.Tensor:
         """Get the normalized complex Fourier basis matrix.
 
         Returns:
@@ -131,14 +136,14 @@ class FourierBasis(Basis):
             This is a unitary matrix: B @ B^H = I
         """
         if device is None:
-            device = torch.device('cpu')
+            device = torch.device("cpu")
 
-        device_key = str(device)
+        device_key = (str(device), dtype)
         if device_key in self._basis_cache:
             return self._basis_cache[device_key]
 
         N = self._size
-        basis = torch.zeros(N, N, dtype=torch.complex64, device=device)
+        basis = torch.zeros(N, N, dtype=dtype, device=device)
 
         # Compute all characters
         for k_idx in range(N):
@@ -165,10 +170,13 @@ class FourierBasis(Basis):
             Complex tensor of shape (..., |G|) containing Euclidean coefficients.
             To get paper's ν̂[k] = (1/|G|) Σ_x ν(x) χ_k(x^{-1}), use transform_paper().
         """
-        basis = self.get_basis_matrix(signal.device)
-        # Handle real input
-        if not signal.is_complex():
-            signal = signal.to(torch.complex64)
+        dtype = (
+            torch.complex128
+            if signal.dtype in (torch.float64, torch.complex128)
+            else torch.complex64
+        )
+        basis = self.get_basis_matrix(signal.device, dtype=dtype)
+        signal = signal.to(dtype)
         return signal @ basis.T.conj()
 
     def transform_paper(self, signal: torch.Tensor) -> torch.Tensor:
@@ -207,8 +215,13 @@ class FourierBasis(Basis):
         Returns:
             Complex tensor of shape (..., |G|)
         """
-        basis = self.get_basis_matrix(coeffs.device)
-        return coeffs @ basis
+        dtype = (
+            torch.complex128
+            if coeffs.dtype in (torch.float64, torch.complex128)
+            else torch.complex64
+        )
+        basis = self.get_basis_matrix(coeffs.device, dtype=dtype)
+        return coeffs.to(dtype) @ basis
 
     def get_frequency_tuple(self, k_idx: int) -> Tuple[int, ...]:
         """Get the frequency tuple (k_1, ..., k_d) for a given flat index."""

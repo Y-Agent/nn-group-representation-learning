@@ -1,7 +1,8 @@
 """Abstract base class for learning tasks."""
 
 from abc import ABC, abstractmethod
-from typing import Tuple, List
+from typing import Tuple
+
 import torch
 
 
@@ -59,10 +60,7 @@ class Task(ABC):
         pass
 
     def generate_train_test_split(
-        self,
-        device: torch.device,
-        frac_train: float = 0.8,
-        shuffle: bool = True
+        self, device: torch.device, frac_train: float = 0.8, shuffle: bool = True
     ) -> Tuple[Tuple[torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
         """Generate train/test split of data.
 
@@ -74,6 +72,8 @@ class Task(ABC):
         Returns:
             Tuple of ((train_data, train_labels), (test_data, test_labels))
         """
+        if not 0 <= frac_train <= 1:
+            raise ValueError("frac_train must lie in [0, 1]")
         data, labels = self.generate_all_data(device)
         n = len(data)
 

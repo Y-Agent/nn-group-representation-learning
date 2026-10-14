@@ -1,0 +1,48 @@
+"""Render equal-height diagnostics and palette choices using unchanged cached statistics."""
+import sys,json,hashlib,shutil
+from pathlib import Path
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+ROOT=Path(__file__).resolve().parents[1]
+OUT=ROOT/'reproduction/paper_plots_revised'
+sys.path.insert(0,str(ROOT/'reproduction/paper_plots/sources/runtime'))
+from src.plotting import setup_plot_style
+from paper_plot_revisions import compact_diagnostics,DIAGNOSTIC_PALETTES
+setup_plot_style()
+d=np.load(OUT/'frobenius_diagnostic_plot_data.npz')
+e=dict(time_arr=d['time'],time_acc=d['accuracy_time'],acc_arr=d['accuracy'])
+for i,key in enumerate(['cond2','cond3','cond1']):
+    e[key+'_mean']=d['alignment_mean'][i];e[key+'_std']=d['alignment_std'][i]
+for i,key in enumerate(['theta1','theta2','xi']):
+    e[key+'_sv_mean']=d['rank_mean'][i];e[key+'_sv_std']=d['rank_std'][i]
+options=OUT/'palette-options';options.mkdir(exist_ok=True)
+reports={}
+for palette in DIAGNOSTIC_PALETTES:
+    fig,arrays,check=compact_diagnostics(e,palette=palette)
+    assert all(np.array_equal(arrays[k],d[k]) for k in arrays)
+    for ext in ['jpg','pdf']:
+        fig.savefig(options/(palette+'.'+ext),dpi=200,bbox_inches=None)
+    plt.close(fig);reports[palette]=check
+    if palette=='slate_blue_burgundy':
+        for ext in ['jpg','pdf']:shutil.copy2(options/(palette+'.'+ext),OUT/'figures'/('frobenius21_diagnostics_compact.'+ext))
+# A labeled contact sheet for comparing the same data across the three palettes.
+fig,axes=plt.subplots(1,3,figsize=(21,5.65))
+for i,(ax,(key,(name,colors))) in enumerate(zip(axes,DIAGNOSTIC_PALETTES.items())):
+    ax.imshow(plt.imread(options/(key+'.jpg')));ax.axis('off')
+    ax.set_title(chr(65+i)+'  '+name+(' (selected)' if i==2 else ''),fontsize=13,pad=12)
+fig.subplots_adjust(left=.006,right=.994,bottom=.015,top=.915,wspace=.035)
+fig.savefig(options/'comparison.png',dpi=130);plt.close(fig)
+(options/'gallery.html').write_text('''<!doctype html><meta charset="utf-8"><title>Diagnostic color options</title><style>body{font:17px system-ui;color:#263D5A;max-width:1250px;margin:40px auto;padding:0 24px}img{width:100%}section{margin:40px 0;border-top:1px solid #ddd;padding-top:20px}a{color:#35689A}</style><h1>Equal-height diagnostics · 3:4 · bottom legends</h1><p>All options use identical saved means, error bars, accuracy, and time samples. C is the selected palette. Markers distinguish layers; solid and dashed lines distinguish the two metrics.</p>'''+''.join(f'<section><h2>{chr(65+i)} · {name}{" (selected)" if i==2 else ""}</h2><img src="{key}.jpg"><p><a href="{key}.pdf">Vector PDF</a> · {" / ".join(colors)}</p></section>' for i,(key,(name,colors)) in enumerate(DIAGNOSTIC_PALETTES.items())))
+(options/'verification.json').write_text(json.dumps(dict(arrays_exactly_unchanged=True,options=reports),indent=2))
+m=json.loads((OUT/'manifest.json').read_text())
+m['presentation_checks']['frobenius21_diagnostics_compact']=reports['slate_blue_burgundy']
+m['presentation_checks']['cached_diagnostic_arrays_unchanged']=True
+for ext in ['jpg','pdf']:
+    p=OUT/'figures'/('frobenius21_diagnostics_compact.'+ext)
+    m['figure_hashes'][p.name]=hashlib.sha256(p.read_bytes()).hexdigest()
+m['presentation_revision_description']='20 neurons; consistent per-series distribution label sides; 3:4 equal-height diagnostics, palette C, full-notation 24 pt one-line legend with reduced vertical gap; no accuracy callout; combined scale figure with Stage I break'
+m.setdefault('presentation_script_hashes',{}).update({p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in [ROOT/'scripts/paper_plot_revisions.py',Path(__file__)]})
+(OUT/'manifest.json').write_text(json.dumps(m,indent=2))
+print('DONE: 3:4 canvas, equal panels, bottom legends, three palettes; cached data identical.')
