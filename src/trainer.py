@@ -1,23 +1,21 @@
 """Spherical gradient descent trainer for wide neural networks."""
 
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
 import torch
 import torch.optim as optim
-from typing import Dict, List, Optional, Tuple, Any
-from dataclasses import dataclass, field
-import numpy as np
-from pathlib import Path
-import json
 
+from .basis import Basis, get_basis
 from .config import Config
 from .model import WideNetworkScaleSphere
-from .tasks import get_task, Task
-from .basis import get_basis, Basis
+from .tasks import Task, get_task
 from .utils import (
-    cross_entropy_high_precision,
     accuracy,
-    project_gradient_to_tangent_space,
     compute_gradient_norms,
     compute_param_norms,
+    cross_entropy_high_precision,
     normalize_to_pi,
 )
 
@@ -25,6 +23,7 @@ from .utils import (
 @dataclass
 class TrainingHistory:
     """Container for training history."""
+
     losses: List[float] = field(default_factory=list)
     accuracies: List[float] = field(default_factory=list)
     grad_norms: List[Tuple[float, float]] = field(default_factory=list)
@@ -45,9 +44,9 @@ class SphericalTrainer:
         - Scales (scale_in, scale_out) are frozen
         - After each step, directions are re-normalized to unit sphere
 
-    Stage 2: Standard GD (optional)
-        - Can train directions, scales, or both
-        - No projection or normalization constraints
+    Stage 2: Direct effective-scale SGD (optional)
+        - Directions are frozen; tied or independent a coefficients are trained
+        - Use predict() to evaluate the final two-stage predictor
     """
 
     def __init__(self, config: Config):
@@ -68,12 +67,15 @@ class SphericalTrainer:
             self.task: Task = get_task(config.task_name, p=config.p)
             self.basis: Basis = get_basis(config.basis_name, n=config.p)
 
+        if self.task.vocab_size != self.basis.size:
+            raise ValueError("Task and basis dimensions must match")
+
         # Generate data
         self.data, self.labels = self.task.generate_all_data(self.device)
 
         # Initialize model
         self.model = WideNetworkScaleSphere(
-            d_vocab=config.d_vocab,
+            d_vocab=self.task.vocab_size,
             width=config.width,
             act_type=config.act_type,
             init_scale=config.init_scale,
@@ -81,8 +83,8 @@ class SphericalTrainer:
         ).to(self.device)
 
         # Apply custom initialization (only if not default 'iid', which model already does)
-        init_type = getattr(config, 'init_type', 'iid')
-        if init_type != 'iid':
+        init_type = getattr(config, "init_type", "iid")
+        if init_type != "iid":
             self._initialize_weights(init_type)
 
         # Training history
@@ -93,7 +95,7 @@ class SphericalTrainer:
         self.initial_state: Optional[Dict[str, torch.Tensor]] = None
         self.stage1_checkpoint: Optional[Dict[str, torch.Tensor]] = None
 
-        print(f"Initialized SphericalTrainer:")
+        print("Initialized SphericalTrainer:")
         print(f"  Task: {self.task}")
         print(f"  Basis: {self.basis}")
         print(f"  Device: {self.device}")
@@ -114,7 +116,10 @@ class SphericalTrainer:
             self._init_iid_sphere()
         elif init_type == "matched_scale":
             # Check that we have a Fourier basis (required for matched_scale)
+            if not self.model.share_embed:
+                raise ValueError("matched_scale initialization requires shared input")
             from .basis.fourier import FourierBasis
+
             if not isinstance(self.basis, FourierBasis):
                 raise ValueError(
                     f"init_type='matched_scale' requires FourierBasis, "
@@ -123,16 +128,16 @@ class SphericalTrainer:
                 )
             self._init_matched_scale()
         else:
-            raise ValueError(f"Unknown init_type: {init_type}. "
-                           f"Must be 'iid' or 'matched_scale'.")
+            raise ValueError(f"Unknown init_type: {init_type}. Must be 'iid' or 'matched_scale'.")
 
     def _init_iid_sphere(self) -> None:
         """IID initialization: both θ and ξ are uniformly random on unit sphere."""
         with torch.no_grad():
-            # W_in: each row is IID on unit sphere
+            # Each positional block is an independent sphere.
             w_in = torch.randn(self.model.width, self.model.d_input, device=self.device)
-            w_in = w_in / w_in.norm(dim=1, keepdim=True)
-            self.model.W_in.data = w_in
+            self.model.W_in.copy_(w_in)
+            self.model.normalize_directions()
+            w_in = self.model.W_in.detach()
 
             # W_out: each column is IID on unit sphere
             w_out = torch.randn(self.model.d_vocab, self.model.width, device=self.device)
@@ -155,10 +160,11 @@ class SphericalTrainer:
         modular_subtraction, etc.) that use FourierBasis.
         """
         with torch.no_grad():
-            # W_in: each row is IID on unit sphere
+            # Each positional block is an independent sphere.
             w_in = torch.randn(self.model.width, self.model.d_input, device=self.device)
-            w_in = w_in / w_in.norm(dim=1, keepdim=True)
-            self.model.W_in.data = w_in
+            self.model.W_in.copy_(w_in)
+            self.model.normalize_directions()
+            w_in = self.model.W_in.detach()
 
             # Compute Fourier transform of W_in (move to CPU for basis transform)
             w_in_cpu = w_in.cpu()
@@ -208,10 +214,7 @@ class SphericalTrainer:
             self.model.W_out.data = w_out.float().to(self.device)
 
     def _create_optimizer(
-        self,
-        params: List[torch.nn.Parameter],
-        optimizer_name: str,
-        lr: float
+        self, params: List[torch.nn.Parameter], optimizer_name: str, lr: float
     ) -> torch.optim.Optimizer:
         """Create optimizer.
 
@@ -241,11 +244,7 @@ class SphericalTrainer:
         acc = accuracy(logits, self.labels)
         return loss, acc
 
-    def _record_phase_and_scale(
-        self,
-        history: TrainingHistory,
-        epoch: int
-    ) -> None:
+    def _record_phase_and_scale(self, history: TrainingHistory, epoch: int) -> None:
         """Record phase and scale information for analysis.
 
         Args:
@@ -257,14 +256,14 @@ class SphericalTrainer:
             W_out = self.model.W_out.detach().cpu()
 
             # Compute scales (norms)
-            scales_in = W_in.norm(dim=1).numpy()
+            scales_in = self.model.input_blocks().detach().cpu().norm(dim=-1).numpy()
             scales_out = W_out.norm(dim=0).numpy()
 
             if self.config.track_scales:
                 history.scale_history.append((scales_in.copy(), scales_out.copy()))
 
             # Compute phases via DFT
-            if self.config.track_phases:
+            if self.config.track_phases and self.model.share_embed:
                 # Normalize for DFT analysis
                 W_in_norm = W_in / W_in.norm(dim=1, keepdim=True)
                 W_out_norm = W_out / W_out.norm(dim=0, keepdim=True)
@@ -291,11 +290,7 @@ class SphericalTrainer:
 
             history.epochs_recorded.append(epoch)
 
-    def _save_snapshot(
-        self,
-        history: TrainingHistory,
-        epoch: int
-    ) -> None:
+    def _save_snapshot(self, history: TrainingHistory, epoch: int) -> None:
         """Save a snapshot of model parameters.
 
         Args:
@@ -320,11 +315,24 @@ class SphericalTrainer:
             print("Stage 1 disabled, skipping...")
             return self.stage1_history
 
+        if self.config.stage1_optimizer != "SGD":
+            raise ValueError("Paper gradient flow requires SGD, not an adaptive optimizer")
+        if not self.config.stage1_freeze_scales:
+            raise ValueError("Paper Stage I requires fixed scales")
+
         print("\n" + "=" * 60)
         print("Stage 1: Projected GD (Directions only, Scale fixed)")
         print("=" * 60)
-        print(f"Fixed scale_in = {self.model.scale_in.item():.4f}, "
-              f"scale_out = {self.model.scale_out.item():.4f}")
+        print(
+            f"Fixed scale_in = {self.model.scale_in.item():.4f}, "
+            f"scale_out = {self.model.scale_out.item():.4f}"
+        )
+
+        if hasattr(self, "scale_model"):
+            del self.scale_model
+
+        self.stage1_history = TrainingHistory()
+        self.stage2_history = TrainingHistory()
 
         # Save initial state
         self.initial_state = self.model.get_state()
@@ -338,8 +346,8 @@ class SphericalTrainer:
         # When share_embed=True, use half lr for W_in (theta) since gradients are doubled
         if self.config.share_embed:
             param_groups = [
-                {'params': [self.model.W_in], 'lr': self.config.stage1_lr / 2},
-                {'params': [self.model.W_out], 'lr': self.config.stage1_lr},
+                {"params": [self.model.W_in], "lr": self.config.stage1_lr / 2},
+                {"params": [self.model.W_out], "lr": self.config.stage1_lr},
             ]
             if self.config.stage1_optimizer == "Adam":
                 optimizer = optim.Adam(param_groups)
@@ -347,13 +355,13 @@ class SphericalTrainer:
                 optimizer = optim.SGD(param_groups)
             else:
                 raise ValueError(f"Unknown optimizer: {self.config.stage1_optimizer}")
-            print(f"Learning rates: W_in={self.config.stage1_lr/2:.6f}, W_out={self.config.stage1_lr:.6f}")
+            print(
+                f"Learning rates: W_in={self.config.stage1_lr / 2:.6f}, W_out={self.config.stage1_lr:.6f}"
+            )
         else:
             direction_params = self.model.get_direction_params()
             optimizer = self._create_optimizer(
-                direction_params,
-                self.config.stage1_optimizer,
-                self.config.stage1_lr
+                direction_params, self.config.stage1_optimizer, self.config.stage1_lr
             )
 
         for epoch in range(self.config.stage1_num_epochs):
@@ -363,21 +371,7 @@ class SphericalTrainer:
             loss, acc = self._compute_loss_and_acc()
             loss.backward()
 
-            # Project gradients onto tangent space of sphere
-            with torch.no_grad():
-                # W_in: rows are unit vectors
-                self.model.W_in.grad = project_gradient_to_tangent_space(
-                    self.model.W_in.data,
-                    self.model.W_in.grad,
-                    dim=1
-                )
-
-                # W_out: columns are unit vectors
-                self.model.W_out.grad = project_gradient_to_tangent_space(
-                    self.model.W_out.data,
-                    self.model.W_out.grad,
-                    dim=0
-                )
+            self.model.project_direction_gradients()
 
             # Optimizer step
             optimizer.step()
@@ -385,6 +379,9 @@ class SphericalTrainer:
             # Project back onto sphere
             self.model.normalize_directions()
 
+            # Record the post-update state, matching the snapshots and time label.
+            with torch.no_grad():
+                loss, acc = self._compute_loss_and_acc()
             # Record history
             self.stage1_history.losses.append(loss.item())
             self.stage1_history.accuracies.append(acc)
@@ -397,19 +394,22 @@ class SphericalTrainer:
 
             # Record phase/scale periodically
             if epoch % self.config.phase_save_every == 0:
-                self._record_phase_and_scale(self.stage1_history, epoch)
+                self._record_phase_and_scale(self.stage1_history, epoch + 1)
 
             # Save parameter snapshots periodically
-            snapshot_every = getattr(self.config, 'snapshot_every', 0)
+            snapshot_every = getattr(self.config, "snapshot_every", 0)
             if snapshot_every > 0 and epoch % snapshot_every == 0:
-                self._save_snapshot(self.stage1_history, epoch)
+                self._save_snapshot(self.stage1_history, epoch + 1)
 
             # Print progress
             if epoch % self.config.print_every == 0:
                 print(f"Epoch {epoch:5d} | Loss: {loss.item():.6f} | Acc: {acc:.4f}")
 
-        print(f"\nStage 1 Final | Loss: {self.stage1_history.losses[-1]:.6f} | "
-              f"Acc: {self.stage1_history.accuracies[-1]:.4f}")
+        if self.stage1_history.losses:
+            print(
+                f"\nStage 1 Final | Loss: {self.stage1_history.losses[-1]:.6f} | "
+                f"Acc: {self.stage1_history.accuracies[-1]:.4f}"
+            )
 
         # Save checkpoint
         self.stage1_checkpoint = self.model.get_state()
@@ -417,100 +417,42 @@ class SphericalTrainer:
         return self.stage1_history
 
     def train_stage2(self) -> TrainingHistory:
-        """Run Stage 2: Standard gradient descent (no spherical constraint).
+        """Freeze directions and optimize the effective coefficient a directly.
 
-        Can train directions, scales, or both based on configuration.
-
-        Returns:
-            Training history for stage 2
+        Untied multipliers: 1 = Section 2 flow; M = Figure 8 comparison clock.
         """
         if not self.config.stage2_enabled:
-            print("Stage 2 disabled, skipping...")
             return self.stage2_history
+        if self.config.stage2_train_directions or not self.config.stage2_train_scales:
+            raise ValueError("Paper Stage II trains scales only; directions must be frozen")
+        if self.config.stage2_optimizer != "SGD":
+            raise ValueError("Paper gradient flow requires SGD")
+        from .flow import FrozenScaleModel
 
-        print("\n" + "=" * 60)
-        print("Stage 2: Standard GD")
-        print("=" * 60)
-        print(f"Training directions: {self.config.stage2_train_directions}")
-        print(f"Training scales: {self.config.stage2_train_scales}")
-
-        # Set requires_grad based on config
-        self.model.W_in.requires_grad = self.config.stage2_train_directions
-        self.model.W_out.requires_grad = self.config.stage2_train_directions
-        self.model.scale_in.requires_grad = self.config.stage2_train_scales
-        self.model.scale_out.requires_grad = self.config.stage2_train_scales
-
-        # Collect trainable parameters with appropriate learning rates
-        # When share_embed=True, use half lr for W_in (theta) since gradients are doubled
-        if self.config.stage2_train_directions and self.config.share_embed:
-            param_groups = [
-                {'params': [self.model.W_in], 'lr': self.config.stage2_lr / 2},
-                {'params': [self.model.W_out], 'lr': self.config.stage2_lr},
-            ]
-            if self.config.stage2_train_scales:
-                param_groups.append({'params': self.model.get_scale_params(), 'lr': self.config.stage2_lr})
-
-            if self.config.stage2_optimizer == "Adam":
-                optimizer = optim.Adam(param_groups)
-            elif self.config.stage2_optimizer == "SGD":
-                optimizer = optim.SGD(param_groups)
-            else:
-                raise ValueError(f"Unknown optimizer: {self.config.stage2_optimizer}")
-            print(f"Learning rates: W_in={self.config.stage2_lr/2:.6f}, W_out={self.config.stage2_lr:.6f}")
-        else:
-            params = []
-            if self.config.stage2_train_directions:
-                params.extend(self.model.get_direction_params())
-            if self.config.stage2_train_scales:
-                params.extend(self.model.get_scale_params())
-
-            if not params:
-                print("No parameters to train in Stage 2!")
-                return self.stage2_history
-
-            optimizer = self._create_optimizer(
-                params,
-                self.config.stage2_optimizer,
-                self.config.stage2_lr
-            )
-
-        for epoch in range(self.config.stage2_num_epochs):
+        self.stage2_history = TrainingHistory()
+        self.scale_model = FrozenScaleModel(self.model, self.config.stage2_tied)
+        lr = self.config.stage2_lr * (
+            1 if self.config.stage2_tied else self.config.stage2_untied_multiplier
+        )
+        optimizer = optim.SGD([self.scale_model.a], lr=lr)
+        for epoch in range(self.config.stage2_num_epochs + 1):
             optimizer.zero_grad()
-
-            # Forward and backward
-            loss, acc = self._compute_loss_and_acc()
-            loss.backward()
-
-            # Standard optimizer step (no projection)
-            optimizer.step()
-
-            # Record history
+            logits = self.scale_model(self.data)
+            loss = cross_entropy_high_precision(logits, self.labels)
             self.stage2_history.losses.append(loss.item())
-            self.stage2_history.accuracies.append(acc)
-
-            grad_norms = compute_gradient_norms(self.model)
-            self.stage2_history.grad_norms.append(grad_norms)
-
-            param_norms = compute_param_norms(self.model)
-            self.stage2_history.param_norms.append(param_norms)
-
-            # Record phase/scale periodically
-            if epoch % self.config.phase_save_every == 0:
-                self._record_phase_and_scale(self.stage2_history, epoch)
-
-            # Save parameter snapshots periodically
-            snapshot_every = getattr(self.config, 'snapshot_every', 0)
-            if snapshot_every > 0 and epoch % snapshot_every == 0:
-                self._save_snapshot(self.stage2_history, epoch)
-
-            # Print progress
-            if epoch % self.config.print_every == 0:
-                print(f"Epoch {epoch:5d} | Loss: {loss.item():.6f} | Acc: {acc:.4f}")
-
-        print(f"\nStage 2 Final | Loss: {self.stage2_history.losses[-1]:.6f} | "
-              f"Acc: {self.stage2_history.accuracies[-1]:.4f}")
-
+            self.stage2_history.accuracies.append(accuracy(logits, self.labels))
+            self.stage2_history.scale_history.append(
+                self.scale_model.a.detach().cpu().numpy().copy()
+            )
+            if epoch == self.config.stage2_num_epochs:
+                break
+            loss.backward()
+            optimizer.step()
         return self.stage2_history
+
+    def predict(self, data):
+        """Evaluate the trained predictor, including Stage-II scales when present."""
+        return self.scale_model(data) if hasattr(self, "scale_model") else self.model(data)
 
     def train(self) -> Tuple[TrainingHistory, TrainingHistory]:
         """Run full training (Stage 1 + Stage 2).
@@ -533,13 +475,14 @@ class SphericalTrainer:
             "config": self.config.to_dict(),
             "model_state": self.model.get_state(),
             "stage": stage,
+            "stage2_scale": self.scale_model.a.detach().cpu()
+            if hasattr(self, "scale_model")
+            else None,
             "stage1_history": {
-                "losses": self.stage1_history.losses,
-                "accuracies": self.stage1_history.accuracies,
+                **asdict(self.stage1_history),
             },
             "stage2_history": {
-                "losses": self.stage2_history.losses,
-                "accuracies": self.stage2_history.accuracies,
+                **asdict(self.stage2_history),
             },
         }
 
@@ -553,8 +496,22 @@ class SphericalTrainer:
         Args:
             path: Path to checkpoint file
         """
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+        stored = checkpoint["config"]
+        for key in ("task_name", "basis_name", "n", "p", "width", "share_embed", "act_type"):
+            if stored.get(key) != self.config.to_dict().get(key):
+                raise ValueError(f"Checkpoint configuration mismatch: {key}")
         self.model.load_state(checkpoint["model_state"], self.device)
+        if hasattr(self, "scale_model"):
+            del self.scale_model
+        self.stage1_history = TrainingHistory(**checkpoint.get("stage1_history", {}))
+        self.stage2_history = TrainingHistory(**checkpoint.get("stage2_history", {}))
+        if checkpoint.get("stage2_scale") is not None:
+            from .flow import FrozenScaleModel
+
+            a = checkpoint["stage2_scale"].to(self.device)
+            self.scale_model = FrozenScaleModel(self.model, tied=a.numel() == 1)
+            self.scale_model.a.data.copy_(a)
         print(f"Loaded checkpoint from {path}")
 
     def analyze_phase_alignment(self, verbose: bool = True) -> Dict[str, Any]:
@@ -568,6 +525,8 @@ class SphericalTrainer:
         Returns:
             Dictionary with analysis results
         """
+        if not self.model.share_embed:
+            raise ValueError("Use src.spectral.Spectrum for separate-input phase diagnostics")
         with torch.no_grad():
             W_in = self.model.W_in.detach().cpu()
             W_out = self.model.W_out.detach().cpu()
@@ -607,26 +566,32 @@ class SphericalTrainer:
                 if phase_match:
                     phase_match_count += 1
 
-                results.append({
-                    "neuron": m,
-                    "freq_in": freq_in_tuple,
-                    "freq_out": freq_out_tuple,
-                    "phi_in": phi_in,
-                    "psi_out": psi_out,
-                    "two_phi": two_phi,
-                    "diff": diff,
-                    "freq_match": freq_match,
-                    "phase_match": phase_match,
-                })
+                results.append(
+                    {
+                        "neuron": m,
+                        "freq_in": freq_in_tuple,
+                        "freq_out": freq_out_tuple,
+                        "phi_in": phi_in,
+                        "psi_out": psi_out,
+                        "two_phi": two_phi,
+                        "diff": diff,
+                        "freq_match": freq_match,
+                        "phase_match": phase_match,
+                    }
+                )
 
             if verbose:
                 print("\n" + "=" * 85)
                 print("Phase Alignment Analysis")
                 print("=" * 85)
-                print(f"Frequency match: {freq_match_count}/{self.config.width} "
-                      f"({100*freq_match_count/self.config.width:.1f}%)")
-                print(f"Phase alignment (|2*phi - psi| < 0.3): {phase_match_count}/{self.config.width} "
-                      f"({100*phase_match_count/self.config.width:.1f}%)")
+                print(
+                    f"Frequency match: {freq_match_count}/{self.config.width} "
+                    f"({100 * freq_match_count / self.config.width:.1f}%)"
+                )
+                print(
+                    f"Phase alignment (|2*phi - psi| < 0.3): {phase_match_count}/{self.config.width} "
+                    f"({100 * phase_match_count / self.config.width:.1f}%)"
+                )
 
             return {
                 "freq_match_count": freq_match_count,

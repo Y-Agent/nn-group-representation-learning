@@ -1,0 +1,112 @@
+"""Local-only Figure 7 drafts: thicker traces and independent scale panels."""
+from pathlib import Path
+import json, sys, hashlib
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from paper_plot_revisions import compact_diagnostics
+
+ROOT=Path(__file__).resolve().parents[1]
+OUT=ROOT.parent/'figure-polish'
+BASE=ROOT/'reproduction/paper_plots'
+REVISED=ROOT/'reproduction/paper_plots_revised'
+RUNS=ROOT/'reproduction/runs'
+(OUT/'figures').mkdir(parents=True,exist_ok=True)
+sys.path.insert(0,str(BASE/'sources/runtime'))
+from src.plotting import setup_plot_style
+setup_plot_style()
+plt.rcParams['font.serif']=['DejaVu Serif']
+plt.rcParams['axes.linewidth']=1.2
+LW=3.2
+
+def save(fig,name):
+    fig.canvas.draw()
+    for ext in ['png','pdf']:
+        fig.savefig(OUT/'figures'/f'{name}.{ext}',dpi=160,bbox_inches=None)
+
+d=np.load(REVISED/'frobenius_diagnostic_plot_data.npz')
+env=dict(time_arr=d['time'],time_acc=d['accuracy_time'],acc_arr=d['accuracy'])
+for i,key in enumerate(['cond2','cond3','cond1']):
+    env[key+'_mean']=d['alignment_mean'][i];env[key+'_std']=d['alignment_std'][i]
+for i,key in enumerate(['theta1','theta2','xi']):
+    env[key+'_sv_mean']=d['rank_mean'][i];env[key+'_sv_std']=d['rank_std'][i]
+diag,arrays,_=compact_diagnostics(env)
+assert all(np.array_equal(arrays[k],d[k]) for k in arrays)
+for ax in diag.axes:
+    for line in ax.lines:line.set_linewidth(LW);line.set_markeredgewidth(1.5)
+    for collection in ax.collections:collection.set_linewidth(1.5)
+for legend in diag.legends:
+    for line in legend.get_lines():line.set_linewidth(LW)
+save(diag,'stage1-diagnostics')
+
+manifest=json.loads((REVISED/'manifest.json').read_text())
+for name in ['f21_wide_h2/history.json','f21_scale_wide_h2/tied.npz','f21_scale_wide_h2/untied_matched.npz']:
+    assert hashlib.sha256((RUNS/name).read_bytes()).hexdigest()==manifest['source_data_hashes'][name]
+h=json.loads((RUNS/'f21_wide_h2/history.json').read_text())
+tied=np.load(RUNS/'f21_scale_wide_h2/tied.npz');pn=np.load(RUNS/'f21_scale_wide_h2/untied_matched.npz')
+stride=400;mask=np.flatnonzero(np.isclose(np.mod(tied['time'],stride),0))
+e=dict(np=np,plt=plt,S1_LR=stride,S2_LR=stride,S2_EPOCHS=len(mask),WIDTH=pn['a'].shape[1],
+    s1_losses=[r['loss_sum'] for r in h[:-1]],s2_tied_losses=tied['loss_sum'][mask],
+    s2_pn_losses=pn['loss_sum'][mask],s2_tied_a_hist=tied['a'][mask].reshape(-1),s2_pn_traj=pn['a'][mask])
+cells=json.loads((BASE/'sources/frobenius21_scale_comparison.json').read_text())
+old_save,old_show=plt.savefig,plt.show
+plt.savefig=lambda *a,**k:None;plt.show=lambda *a,**k:None
+exec(cells['11'],e);source_loss=plt.gcf()
+exec(cells['12'],e);source_pn=plt.gcf()
+plt.savefig,plt.show=old_save,old_show
+assert e['s2_offset']==h[-1]['time']==40000
+
+first=plt.figure(figsize=(12,8))
+small=first.add_axes([.15,.18,.14,.71]);large=first.add_axes([.32,.18,.53,.71],sharey=small)
+scale=large.twinx()
+for ax in [small,large]:
+    for line in source_loss.axes[0].lines[:3]:
+        ax.plot(line.get_xdata(),line.get_ydata(),color=line.get_color(),ls=line.get_linestyle(),lw=LW)
+    ax.set_ylim(-.06,3.2);ax.grid(True,alpha=.22);ax.tick_params(labelsize=24)
+small.set_xlim(0,8000);small.set_xticks([0,5000]);small.set_yticks([0,1,2,3]);small.set_ylabel('Loss',fontsize=30)
+large.set_xlim(38000,50000);large.set_xticks([40000,45000,50000]);large.tick_params(left=False,labelleft=False)
+small.spines['right'].set_visible(False);large.spines['left'].set_visible(False);scale.spines['left'].set_visible(False)
+large.axvline(40000,color='#555555',ls=':',lw=1.8,alpha=.7)
+scale_line,=scale.plot(e['s2_times'],e['s2_tied_a_hist'],color='#368A87',ls='-.',marker='o',ms=4.5,
+    markevery=e['markevery'],lw=LW)
+scale.set_ylim(-25,max(e['s2_tied_a_hist'])*1.08);scale.set_yticks([0,500,1000]);scale.grid(False)
+scale.tick_params(axis='y',labelcolor='#28736F',labelsize=24);scale.set_ylabel('Tied scale $a$',fontsize=30,color='#28736F')
+scale_left=small.twinx();scale_left.set_ylim(scale.get_ylim());scale_left.set_yticks([])
+for spine in scale_left.spines.values():spine.set_visible(False)
+for ax,xx in [(scale_left,[0,8000]),(scale,[38000,40000])]:ax.plot(xx,[.125,.125],color='#368A87',ls='-.',lw=LW)
+for ax,edge in [(small,1),(large,0)]:
+    dx=.004/ax.get_position().width;dy=.006/ax.get_position().height
+    for y in [0,1]:ax.plot([edge-dx,edge+dx],[y-dy,y+dy],transform=ax.transAxes,color='#333333',lw=1.6,clip_on=False)
+first.text(.15,.975,'(i)',fontsize=30,va='top')
+first.text(.5,.055,'Time (Stage I + II)',fontsize=30,ha='center')
+legend1=scale.legend(large.lines[:3]+[scale_line],['Stage I loss','Tied loss','Per-neuron loss','Tied scale $a$'],
+    loc='lower right',bbox_to_anchor=(.98,.075),fontsize=24,framealpha=.96,edgecolor='#dddddd',labelspacing=.3)
+save(first,'scale-loss')
+
+second,ax=plt.subplots(figsize=(12,8))
+second.subplots_adjust(left=.15,right=.85,bottom=.18,top=.89)
+colors=['#4E79A7','#59A14F','#B58B2A','#C47A35','#76B7B2','#E15759','#B07AA1','#9C755F','#6C7785','#914F63']
+for rank,line in enumerate(source_pn.axes[0].lines):
+    x=np.asarray(line.get_xdata());y=np.asarray(line.get_ydata());keep=x<=10000
+    ax.plot(x[keep]+40000,y[keep],color=colors[rank],ls=line.get_linestyle(),lw=LW,
+        marker=line.get_marker(),ms=4.5,markevery=line.get_markevery(),label=line.get_label())
+    assert np.array_equal(ax.lines[-1].get_ydata(),y[keep])
+ax.set_xlim(40000,50000);ax.set_ylim(bottom=-25)
+ax.set_xticks([40000,42500,45000,47500,50000]);ax.set_xlabel('Time (Stage I + II)',fontsize=30)
+ax.set_ylabel('Per-neuron scale',fontsize=30);ax.tick_params(labelsize=24);ax.grid(True,alpha=.22)
+second.text(.15,.975,'(ii)',fontsize=30,va='top')
+legend2=ax.legend(loc='lower right',fontsize=22,ncol=2,framealpha=.96,edgecolor='#dddddd',
+    columnspacing=.8,labelspacing=.22,handlelength=1.3,borderpad=.4)
+save(second,'per-neuron-scale')
+
+for fig,axis,legend in [(first,scale,legend1),(second,ax,legend2)]:
+    fig.canvas.draw();box=legend.get_window_extent(fig.canvas.get_renderer())
+    assert all(axis.get_window_extent().contains(*point) for point in box.get_points())
+for new,old in zip(large.lines[:3],source_loss.axes[0].lines[:3]):
+    assert np.array_equal(new.get_xdata(),old.get_xdata()) and np.array_equal(new.get_ydata(),old.get_ydata())
+(OUT/'separate-plots-verification.json').write_text(json.dumps(dict(local_only=True,
+    line_width=LW,original_data_unchanged=True,second_plot_total_time=[40000,50000],
+    second_plot_stage2_time=[0,10000],first_plot_stage1_time=[0,40000],
+    first_plot_stage1_break=[8000,38000],first_plot_stage2_time=[40000,50000],legends='Inside, bottom right',panels_separate=True),indent=2))
+print('Saved three local plots; RHS (ii) ends at total time 50,000; all scientific traces verified.')

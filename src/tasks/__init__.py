@@ -1,10 +1,10 @@
 """Task definitions for neural network learning."""
 
+from .alternating import AlternatingGroupMultiplication
 from .base import Task
+from .frobenius21 import Frobenius21Multiplication
 from .modular import ModularAddition
 from .symmetric import SymmetricGroupMultiplication
-from .alternating import AlternatingGroupMultiplication
-from .frobenius21 import Frobenius21Multiplication
 
 # Task registry
 TASK_REGISTRY = {
@@ -36,7 +36,16 @@ def get_task(name: str, **kwargs) -> Task:
     elif "n" in kwargs and "p" in kwargs:
         kwargs.pop("p")  # n takes precedence
 
+    if name == "frobenius21":
+        kwargs = {}
     return TASK_REGISTRY[name](**kwargs)
 
 
-__all__ = ["Task", "get_task", "ModularAddition", "SymmetricGroupMultiplication", "AlternatingGroupMultiplication", "Frobenius21Multiplication"]
+__all__ = [
+    "Task",
+    "get_task",
+    "ModularAddition",
+    "SymmetricGroupMultiplication",
+    "AlternatingGroupMultiplication",
+    "Frobenius21Multiplication",
+]

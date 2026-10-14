@@ -1,3 +1,22 @@
+# Group composition: code and paper reproduction
+
+The accepted manuscript figures have one maintained workflow. See
+[REPRODUCTION.md](REPRODUCTION.md) for the exact numerical settings, two pinned
+rendering environments, figure map, fonts, checkpoint inputs, and validation.
+
+```bash
+.venv-paper/bin/python -m paper_reproduction render \
+  --notebook-python .venv-notebook/bin/python --output reproduction/paper
+.venv-paper/bin/python -m paper_reproduction verify --output reproduction/paper
+```
+
+Use `python -m paper_reproduction train` to inspect the CPU experiment plan before
+running it. `--execute` starts training into a separate results directory.
+The original notebook cells remain frozen; the iterative presentation drafts are
+archived under `scripts/legacy/` and are no longer part of the supported workflow.
+The [code review](docs/CODE_REVIEW.md) records the findings, fixes, verification,
+and remaining limitations of the October 2026 cleanup.
+
 Public code repository for the paper **"Neural Networks Provably Learn Spectral Representations for Group Composition"** by Jianliang He\*, Leda Wang\*, Fengzhuo Zhang, Siyu Chen, Zhuoran Yang.
 
 ## Overview
@@ -51,13 +70,21 @@ nn-group-representation-learning/
 │   ├── model.py              # WideNetworkScaleSphere
 │   ├── trainer.py            # SphericalTrainer (Stage 1 & 2)
 │   ├── config.py             # Config dataclass
+│   ├── flow.py               # Projected direction flow and frozen effective scales
+│   ├── checkpointing.py      # Atomic writes and run provenance contracts
+│   ├── experiment.py        # Initialization and numerical diagnostics
+│   ├── scale_training.py    # Resumable Stage-II runner
 │   ├── utils.py              # Training utilities
 │   ├── frobenius_analysis.py # Spectral analysis: d_sim, Plancherel energy, rank-1 ratio
 │   ├── plotting.py           # Generic DFT plots: plot_dft_bars, plot_dft_heatmap
 │   ├── tasks/                # Group composition tasks
 │   └── basis/                # Spectral bases (Fourier, Frobenius-21 Peter–Weyl)
-├── notebooks/
-└── figures/
+├── paper_reproduction/       # Canonical render / verify / train / package CLI
+├── scripts/                  # Training entry points; legacy plotting drafts as text
+├── tests/                    # Algebra, gradients, state, resumption, and CLI regressions
+├── notebooks/                # Exploratory notebooks in the full Git checkout
+├── reproduction/             # Configs, archived inputs, frozen cells, and baselines
+└── REPRODUCTION.md           # Exact paper setup and figure map
 ```
 
 ## Python API

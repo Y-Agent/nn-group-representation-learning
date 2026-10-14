@@ -16,12 +16,13 @@ For A_4: 12 elements, 4 irreps of dimensions 1, 1, 1, 3
 For A_5: 60 elements, 5 irreps of dimensions 1, 3, 3, 4, 5
 """
 
-from typing import List, Dict, Tuple, Optional
-import torch
-import numpy as np
-from math import factorial, sqrt
-from itertools import permutations
 import cmath
+from itertools import permutations
+from math import factorial
+from typing import Dict, List, Tuple
+
+import numpy as np
+import torch
 
 from .base import Basis
 
@@ -55,7 +56,7 @@ class AlternatingGroupBasis(Basis):
         if n < 3:
             raise ValueError(f"n must be at least 3, got {n}")
         if n > 5:
-            raise ValueError(f"n > 5 not yet supported (A_6 has 360 elements)")
+            raise ValueError("n > 5 not yet supported (A_6 has 360 elements)")
 
         self.n = n
         self._size = factorial(n) // 2
@@ -94,33 +95,33 @@ class AlternatingGroupBasis(Basis):
             - ω-rep: ρ((012)) = ω = e^(2πi/3)
             - ω²-rep: ρ((012)) = ω²
         """
-        labels = ['trivial', 'omega', 'omega_conj']
-        dims = {'trivial': 1, 'omega': 1, 'omega_conj': 1}
+        labels = ["trivial", "omega", "omega_conj"]
+        dims = {"trivial": 1, "omega": 1, "omega_conj": 1}
         irreps = {}
 
         # A_3 elements: e, (012), (021)
-        e = (0, 1, 2)      # identity
-        c1 = (1, 2, 0)     # (012) 3-cycle
-        c2 = (2, 0, 1)     # (021) 3-cycle (= c1^2)
+        e = (0, 1, 2)  # identity
+        c1 = (1, 2, 0)  # (012) 3-cycle
+        c2 = (2, 0, 1)  # (021) 3-cycle (= c1^2)
 
         omega = cmath.exp(2j * cmath.pi / 3)
 
         # Trivial representation
-        irreps['trivial'] = {
+        irreps["trivial"] = {
             e: np.array([[1.0 + 0j]]),
             c1: np.array([[1.0 + 0j]]),
             c2: np.array([[1.0 + 0j]]),
         }
 
         # ω representation
-        irreps['omega'] = {
+        irreps["omega"] = {
             e: np.array([[1.0 + 0j]]),
             c1: np.array([[omega]]),
             c2: np.array([[omega**2]]),
         }
 
         # ω² representation (complex conjugate)
-        irreps['omega_conj'] = {
+        irreps["omega_conj"] = {
             e: np.array([[1.0 + 0j]]),
             c1: np.array([[omega**2]]),
             c2: np.array([[omega]]),
@@ -143,8 +144,8 @@ class AlternatingGroupBasis(Basis):
             - ω²-rep (1D): conjugate of ω-rep
             - Standard (3D): restriction of S_4 standard rep
         """
-        labels = ['trivial', 'omega', 'omega_conj', 'standard']
-        dims = {'trivial': 1, 'omega': 1, 'omega_conj': 1, 'standard': 3}
+        labels = ["trivial", "omega", "omega_conj", "standard"]
+        dims = {"trivial": 1, "omega": 1, "omega_conj": 1, "standard": 3}
         irreps = {}
 
         # Generate all even permutations of {0,1,2,3}
@@ -156,7 +157,7 @@ class AlternatingGroupBasis(Basis):
             return tuple(s[t[i]] for i in range(4))
 
         def inverse(p):
-            inv = [0]*4
+            inv = [0] * 4
             for i, j in enumerate(p):
                 inv[j] = i
             return tuple(inv)
@@ -174,41 +175,41 @@ class AlternatingGroupBasis(Basis):
         def get_conjugacy_class(p):
             """Determine conjugacy class of permutation."""
             if p == (0, 1, 2, 3):
-                return 'identity'
+                return "identity"
             # Check if double transposition
             if all(p[p[i]] == i for i in range(4)) and sum(1 for i in range(4) if p[i] == i) == 0:
-                return 'double_trans'
+                return "double_trans"
             # Must be a 3-cycle - check which conjugacy class
             if p in class_of_ref:
-                return '3cycle_class1'
+                return "3cycle_class1"
             else:
-                return '3cycle_class2'
+                return "3cycle_class2"
 
         # Trivial representation
-        irreps['trivial'] = {p: np.array([[1.0 + 0j]]) for p in perms}
+        irreps["trivial"] = {p: np.array([[1.0 + 0j]]) for p in perms}
 
         # ω and ω² representations
         # Double transpositions → 1
         # 3-cycle class 1 → ω (for omega rep)
         # 3-cycle class 2 → ω² (for omega rep)
 
-        irreps['omega'] = {}
-        irreps['omega_conj'] = {}
+        irreps["omega"] = {}
+        irreps["omega_conj"] = {}
 
         for p in perms:
             cc = get_conjugacy_class(p)
-            if cc == 'identity':
-                irreps['omega'][p] = np.array([[1.0 + 0j]])
-                irreps['omega_conj'][p] = np.array([[1.0 + 0j]])
-            elif cc == 'double_trans':
-                irreps['omega'][p] = np.array([[1.0 + 0j]])
-                irreps['omega_conj'][p] = np.array([[1.0 + 0j]])
-            elif cc == '3cycle_class1':
-                irreps['omega'][p] = np.array([[omega]])
-                irreps['omega_conj'][p] = np.array([[omega**2]])
+            if cc == "identity":
+                irreps["omega"][p] = np.array([[1.0 + 0j]])
+                irreps["omega_conj"][p] = np.array([[1.0 + 0j]])
+            elif cc == "double_trans":
+                irreps["omega"][p] = np.array([[1.0 + 0j]])
+                irreps["omega_conj"][p] = np.array([[1.0 + 0j]])
+            elif cc == "3cycle_class1":
+                irreps["omega"][p] = np.array([[omega]])
+                irreps["omega_conj"][p] = np.array([[omega**2]])
             else:  # 3cycle_class2
-                irreps['omega'][p] = np.array([[omega**2]])
-                irreps['omega_conj'][p] = np.array([[omega]])
+                irreps["omega"][p] = np.array([[omega**2]])
+                irreps["omega_conj"][p] = np.array([[omega]])
 
         # Standard 3D representation
         # Restriction of S_4 standard rep to A_4
@@ -217,13 +218,15 @@ class AlternatingGroupBasis(Basis):
         sqrt12 = np.sqrt(12)
 
         # Orthonormal basis for 3D subspace orthogonal to (1,1,1,1)
-        P = np.array([
-            [1/sqrt2, -1/sqrt2, 0, 0],
-            [1/sqrt6, 1/sqrt6, -2/sqrt6, 0],
-            [1/sqrt12, 1/sqrt12, 1/sqrt12, -3/sqrt12]
-        ])
+        P = np.array(
+            [
+                [1 / sqrt2, -1 / sqrt2, 0, 0],
+                [1 / sqrt6, 1 / sqrt6, -2 / sqrt6, 0],
+                [1 / sqrt12, 1 / sqrt12, 1 / sqrt12, -3 / sqrt12],
+            ]
+        )
 
-        irreps['standard'] = {}
+        irreps["standard"] = {}
         for p in perms:
             # Natural permutation matrix
             nat = np.zeros((4, 4))
@@ -231,7 +234,7 @@ class AlternatingGroupBasis(Basis):
                 nat[p[i], i] = 1.0
             # Project to 3D subspace
             rep = P @ nat @ P.T
-            irreps['standard'][p] = rep.astype(complex)
+            irreps["standard"][p] = rep.astype(complex)
 
         return labels, dims, irreps
 
@@ -262,8 +265,8 @@ class AlternatingGroupBasis(Basis):
 
         where φ = (1+√5)/2 is the golden ratio.
         """
-        labels = ['trivial', 'rep_3a', 'rep_3b', 'rep_4', 'rep_5']
-        dims = {'trivial': 1, 'rep_3a': 3, 'rep_3b': 3, 'rep_4': 4, 'rep_5': 5}
+        labels = ["trivial", "rep_3a", "rep_3b", "rep_4", "rep_5"]
+        dims = {"trivial": 1, "rep_3a": 3, "rep_3b": 3, "rep_4": 4, "rep_5": 5}
         irreps = {}
 
         perms = [p for p in permutations(range(5)) if permutation_sign(p) == 1]
@@ -273,7 +276,7 @@ class AlternatingGroupBasis(Basis):
             return tuple(s[t[i]] for i in range(5))
 
         def inverse(p):
-            inv = [0]*5
+            inv = [0] * 5
             for i, j in enumerate(p):
                 inv[j] = i
             return tuple(inv)
@@ -297,8 +300,7 @@ class AlternatingGroupBasis(Basis):
 
         # Build conjugacy classes explicitly
         # Reference elements for each class
-        ref_5cycle_plus = (1, 2, 3, 4, 0)   # (01234)
-        ref_5cycle_minus = (1, 2, 4, 0, 3)  # (01243) - different A_5 class
+        ref_5cycle_plus = (1, 2, 3, 4, 0)  # (01234)
 
         # Compute A_5 conjugacy class of ref_5cycle_plus
         class_5plus = set()
@@ -309,50 +311,82 @@ class AlternatingGroupBasis(Basis):
         def get_conjugacy_class(p):
             """Determine conjugacy class of permutation in A_5."""
             if p == identity:
-                return 'identity'
+                return "identity"
             cs = get_cycle_structure(p)
             if cs == (2, 2):
-                return 'double_trans'
+                return "double_trans"
             elif cs == (3,):
-                return '3cycle'
+                return "3cycle"
             elif cs == (5,):
                 if p in class_5plus:
-                    return '5cycle_plus'
+                    return "5cycle_plus"
                 else:
-                    return '5cycle_minus'
+                    return "5cycle_minus"
             else:
                 raise ValueError(f"Unexpected cycle structure: {cs}")
 
         # Character values (φ = golden ratio)
         phi = (1 + np.sqrt(5)) / 2
         chi = {
-            'trivial': {'identity': 1, 'double_trans': 1, '3cycle': 1, '5cycle_plus': 1, '5cycle_minus': 1},
-            'rep_3a': {'identity': 3, 'double_trans': -1, '3cycle': 0, '5cycle_plus': phi, '5cycle_minus': 1-phi},
-            'rep_3b': {'identity': 3, 'double_trans': -1, '3cycle': 0, '5cycle_plus': 1-phi, '5cycle_minus': phi},
-            'rep_4': {'identity': 4, 'double_trans': 0, '3cycle': 1, '5cycle_plus': -1, '5cycle_minus': -1},
-            'rep_5': {'identity': 5, 'double_trans': 1, '3cycle': -1, '5cycle_plus': 0, '5cycle_minus': 0},
+            "trivial": {
+                "identity": 1,
+                "double_trans": 1,
+                "3cycle": 1,
+                "5cycle_plus": 1,
+                "5cycle_minus": 1,
+            },
+            "rep_3a": {
+                "identity": 3,
+                "double_trans": -1,
+                "3cycle": 0,
+                "5cycle_plus": phi,
+                "5cycle_minus": 1 - phi,
+            },
+            "rep_3b": {
+                "identity": 3,
+                "double_trans": -1,
+                "3cycle": 0,
+                "5cycle_plus": 1 - phi,
+                "5cycle_minus": phi,
+            },
+            "rep_4": {
+                "identity": 4,
+                "double_trans": 0,
+                "3cycle": 1,
+                "5cycle_plus": -1,
+                "5cycle_minus": -1,
+            },
+            "rep_5": {
+                "identity": 5,
+                "double_trans": 1,
+                "3cycle": -1,
+                "5cycle_plus": 0,
+                "5cycle_minus": 0,
+            },
         }
 
         # ===== 1. Trivial representation (1D) =====
-        irreps['trivial'] = {p: np.array([[1.0 + 0j]]) for p in perms}
+        irreps["trivial"] = {p: np.array([[1.0 + 0j]]) for p in perms}
 
         # ===== 2. Standard 4D representation =====
         # Project 5D natural permutation onto orthogonal complement of (1,1,1,1,1)
         sqrt2, sqrt6, sqrt12, sqrt20 = np.sqrt(2), np.sqrt(6), np.sqrt(12), np.sqrt(20)
-        P4 = np.array([
-            [1/sqrt2, -1/sqrt2, 0, 0, 0],
-            [1/sqrt6, 1/sqrt6, -2/sqrt6, 0, 0],
-            [1/sqrt12, 1/sqrt12, 1/sqrt12, -3/sqrt12, 0],
-            [1/sqrt20, 1/sqrt20, 1/sqrt20, 1/sqrt20, -4/sqrt20]
-        ])
+        P4 = np.array(
+            [
+                [1 / sqrt2, -1 / sqrt2, 0, 0, 0],
+                [1 / sqrt6, 1 / sqrt6, -2 / sqrt6, 0, 0],
+                [1 / sqrt12, 1 / sqrt12, 1 / sqrt12, -3 / sqrt12, 0],
+                [1 / sqrt20, 1 / sqrt20, 1 / sqrt20, 1 / sqrt20, -4 / sqrt20],
+            ]
+        )
 
-        irreps['rep_4'] = {}
+        irreps["rep_4"] = {}
         for p in perms:
             nat = np.zeros((5, 5))
             for i in range(5):
                 nat[p[i], i] = 1.0
             rep = P4 @ nat @ P4.T
-            irreps['rep_4'][p] = rep.astype(complex)
+            irreps["rep_4"][p] = rep.astype(complex)
 
         # ===== 3. Two 3D representations from Alt^2(4D) =====
         # Alt^2(4D) = 6D representation that decomposes as 3a ⊕ 3b
@@ -362,7 +396,7 @@ class AlternatingGroupBasis(Basis):
 
             Basis for Alt^2(R^4): e_0∧e_1, e_0∧e_2, e_0∧e_3, e_1∧e_2, e_1∧e_3, e_2∧e_3
             """
-            basis = [(0,1), (0,2), (0,3), (1,2), (1,3), (2,3)]
+            basis = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)]
             dim = len(basis)
             result = np.zeros((dim, dim), dtype=complex)
             for row, (i, j) in enumerate(basis):
@@ -373,14 +407,14 @@ class AlternatingGroupBasis(Basis):
             return result
 
         # Build Alt^2(rep_4) for all elements
-        alt2_rep = {p: alt2_matrix(irreps['rep_4'][p].real) for p in perms}
+        alt2_rep = {p: alt2_matrix(irreps["rep_4"][p].real) for p in perms}
 
         # Use character-based projection to separate 3a and 3b
         # P_{3a} = (3/60) * Σ_g χ_{3a}(g)* · ρ_{Alt^2}(g)
         P_3a = np.zeros((6, 6), dtype=complex)
         for p in perms:
             cc = get_conjugacy_class(p)
-            chi_val = chi['rep_3a'][cc]
+            chi_val = chi["rep_3a"][cc]
             P_3a += chi_val.conjugate() * alt2_rep[p]
         P_3a *= 3.0 / 60.0
 
@@ -395,16 +429,16 @@ class AlternatingGroupBasis(Basis):
         basis_3a = eigvecs[:, :3].T  # Shape (3, 6)
 
         # Project Alt^2 onto 3a subspace
-        irreps['rep_3a'] = {}
+        irreps["rep_3a"] = {}
         for p in perms:
             proj = basis_3a @ alt2_rep[p] @ basis_3a.T.conj()
-            irreps['rep_3a'][p] = proj
+            irreps["rep_3a"][p] = proj
 
         # Similarly for 3b (or use orthogonal complement)
         P_3b = np.zeros((6, 6), dtype=complex)
         for p in perms:
             cc = get_conjugacy_class(p)
-            chi_val = chi['rep_3b'][cc]
+            chi_val = chi["rep_3b"][cc]
             P_3b += chi_val.conjugate() * alt2_rep[p]
         P_3b *= 3.0 / 60.0
 
@@ -413,10 +447,10 @@ class AlternatingGroupBasis(Basis):
         eigvecs_b = eigvecs_b[:, idx_b]
         basis_3b = eigvecs_b[:, :3].T
 
-        irreps['rep_3b'] = {}
+        irreps["rep_3b"] = {}
         for p in perms:
             proj = basis_3b @ alt2_rep[p] @ basis_3b.T.conj()
-            irreps['rep_3b'][p] = proj
+            irreps["rep_3b"][p] = proj
 
         # ===== 4. 5D representation from Sym^2(3a) minus trivial =====
         # Sym^2(3D) = 6D, decomposes as 1 ⊕ 5
@@ -436,9 +470,7 @@ class AlternatingGroupBasis(Basis):
             for row_idx, (i, j) in enumerate(off_diag):
                 for col_idx, (k, l) in enumerate(off_diag):
                     # Coefficient of symmetric (i,j) from symmetric (k,l)
-                    result[3 + row_idx, 3 + col_idx] = (
-                        M[i, k] * M[j, l] + M[i, l] * M[j, k]
-                    )
+                    result[3 + row_idx, 3 + col_idx] = M[i, k] * M[j, l] + M[i, l] * M[j, k]
                 # Mixed: symmetric (i,j) from diagonal (k,k)
                 for col in range(3):
                     result[3 + row_idx, col] = np.sqrt(2) * M[i, col] * M[j, col]
@@ -448,7 +480,7 @@ class AlternatingGroupBasis(Basis):
             return result
 
         # Build Sym^2(rep_3a)
-        sym2_rep = {p: sym2_from_3d(irreps['rep_3a'][p]) for p in perms}
+        sym2_rep = {p: sym2_from_3d(irreps["rep_3a"][p]) for p in perms}
 
         # Project out trivial component
         # Trivial subspace is spanned by identity in symmetric tensor = (1,1,1,0,0,0)/√3
@@ -463,10 +495,10 @@ class AlternatingGroupBasis(Basis):
         basis_5d = eigvecs_5[:, :5].T  # Top 5 eigenvectors
 
         # Project Sym^2 onto 5D subspace
-        irreps['rep_5'] = {}
+        irreps["rep_5"] = {}
         for p in perms:
             proj = basis_5d @ sym2_rep[p] @ basis_5d.T.conj()
-            irreps['rep_5'][p] = proj
+            irreps["rep_5"][p] = proj
 
         return labels, dims, irreps
 
@@ -501,7 +533,7 @@ class AlternatingGroupBasis(Basis):
             dim = self._irrep_dims[label]
             for i in range(dim):
                 for j in range(dim):
-                    names.append(f"ρ_{label}({i+1},{j+1})")
+                    names.append(f"ρ_{label}({i + 1},{j + 1})")
         return names
 
     def get_basis_matrix(self, device: torch.device = None) -> torch.Tensor:
@@ -516,7 +548,7 @@ class AlternatingGroupBasis(Basis):
             B_{(λ,i,j), g} = √(d_λ/|A_n|) · ρ_λ(g)_{ji}   (note: j,i indices)
         """
         if device is None:
-            device = torch.device('cpu')
+            device = torch.device("cpu")
 
         device_key = str(device)
         if device_key in self._basis_cache:
@@ -545,8 +577,7 @@ class AlternatingGroupBasis(Basis):
     def transform(self, signal: torch.Tensor) -> torch.Tensor:
         """Apply Fourier transform on A_n."""
         basis = self.get_basis_matrix(signal.device)
-        if not signal.is_complex():
-            signal = signal.to(torch.complex128)
+        signal = signal.to(basis.dtype)
         return signal @ basis.T.conj()
 
     def inverse_transform(self, coeffs: torch.Tensor) -> torch.Tensor:
@@ -556,7 +587,7 @@ class AlternatingGroupBasis(Basis):
         the inverse is ν = c·B.
         """
         basis = self.get_basis_matrix(coeffs.device)
-        return coeffs @ basis
+        return coeffs.to(basis.dtype) @ basis
 
     def get_irrep_block_indices(self, label: str) -> Tuple[int, int]:
         """Get the start and end indices for an irrep block in the basis."""
@@ -583,7 +614,7 @@ class AlternatingGroupBasis(Basis):
                 local_idx = idx - curr_idx
                 i = local_idx // dim
                 j = local_idx % dim
-                return f"{label}({i+1},{j+1})"
+                return f"{label}({i + 1},{j + 1})"
             curr_idx += block_size
         return f"idx={idx}"
 

@@ -1,15 +1,16 @@
 """Utility functions for training and analysis."""
 
+from typing import Tuple
+
+import numpy as np
 import torch
 import torch.nn.functional as F
-import numpy as np
-from typing import Tuple
 
 
 def cross_entropy_high_precision(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     """Compute cross-entropy loss with high precision.
 
-    Uses float32 log_softmax to avoid underflow with confident predictions.
+    Preserves float64 logits; promotes lower precision logits to float32.
 
     Args:
         logits: Predicted logits of shape (batch_size, num_classes)
@@ -18,7 +19,7 @@ def cross_entropy_high_precision(logits: torch.Tensor, labels: torch.Tensor) -> 
     Returns:
         Scalar loss value
     """
-    logprobs = F.log_softmax(logits.float(), dim=-1)
+    logprobs = F.log_softmax(logits if logits.dtype == torch.float64 else logits.float(), dim=-1)
     return -logprobs[torch.arange(len(labels), device=logits.device), labels].sum()
 
 
@@ -46,9 +47,7 @@ def normalize_to_2pi(x: float) -> float:
 
 
 def project_gradient_to_tangent_space(
-    weight: torch.Tensor,
-    grad: torch.Tensor,
-    dim: int
+    weight: torch.Tensor, grad: torch.Tensor, dim: int
 ) -> torch.Tensor:
     """Project gradient onto tangent space of unit sphere.
 
@@ -63,22 +62,9 @@ def project_gradient_to_tangent_space(
     Returns:
         Projected gradient
     """
-    projected_grad = grad.clone()
-
-    if dim == 1:  # Rows are unit vectors (like W_in)
-        for i in range(weight.shape[0]):
-            w = weight[i]
-            g = grad[i]
-            projected_grad[i] = g - torch.dot(g, w) * w
-    elif dim == 0:  # Columns are unit vectors (like W_out)
-        for j in range(weight.shape[1]):
-            w = weight[:, j]
-            g = grad[:, j]
-            projected_grad[:, j] = g - torch.dot(g, w) * w
-    else:
+    if dim not in (0, 1):
         raise ValueError(f"dim must be 0 or 1, got {dim}")
-
-    return projected_grad
+    return grad - (grad * weight).sum(dim=dim, keepdim=True) * weight
 
 
 def compute_gradient_norms(model) -> Tuple[float, float]:

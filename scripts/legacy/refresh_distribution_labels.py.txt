@@ -1,0 +1,44 @@
+"""Refresh only the two distribution figures, with fixed label positions."""
+import sys,json,hashlib
+from pathlib import Path
+from types import SimpleNamespace
+import numpy as np
+import torch
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+ROOT=Path(__file__).resolve().parents[1];OUT=ROOT/'reproduction/paper_plots_revised';BASE=ROOT/'reproduction/paper_plots';RUNS=ROOT/'reproduction/runs'
+sys.path.insert(0,str(BASE/'sources/runtime'))
+from src.basis import FourierBasis
+from paper_plot_revisions import fix_distribution_labels
+if not hasattr(cm,'get_cmap'):cm.get_cmap=plt.get_cmap
+torch.set_num_threads(2)
+m=json.loads((OUT/'manifest.json').read_text())
+cells=json.loads((BASE/'sources/modular_addition_unshared.json').read_text())
+current=''
+def save(*args,**kwargs):
+    fig=plt.gcf()
+    original=[(line.get_xdata().copy(),line.get_ydata().copy()) for ax in fig.axes for line in ax.lines]
+    check=fix_distribution_labels(fig)
+    for (x,y),line in zip(original,[line for ax in fig.axes for line in ax.lines]):
+        assert np.array_equal(x,line.get_xdata()) and np.array_equal(y,line.get_ydata())
+    check['plotted_arrays_unchanged']=True;m['presentation_checks'][current]=check
+    for ext in ['jpg','pdf']:
+        p=OUT/'figures'/(current+'.'+ext);fig.savefig(p,dpi=300,bbox_inches='tight')
+        m['figure_hashes'][p.name]=hashlib.sha256(p.read_bytes()).hexdigest()
+plt.savefig=save;plt.show=lambda *a,**k:plt.close('all')
+e={};exec(cells['1'],e)
+for filename in ['initial.npz','final.npz']:
+    p=RUNS/'z30_h2'/filename;assert hashlib.sha256(p.read_bytes()).hexdigest()==m['source_data_hashes']['z30_h2/'+filename]
+with np.load(RUNS/'z30_h2/final.npz') as d:wi=torch.from_numpy(d['W_in'].copy());wo=torch.from_numpy(d['W_out'].copy())
+with np.load(RUNS/'z30_h2/initial.npz') as d:ii=torch.from_numpy(d['W_in'].copy());io=torch.from_numpy(d['W_out'].copy())
+e.update(config=SimpleNamespace(d_vocab=30),trainer=SimpleNamespace(model=SimpleNamespace(W_in=wi,W_out=wo),basis=FourierBasis([2,3,5])),W_in_init=ii,W_out_init=io,M=len(wi))
+exec(cells['9'],e)
+current='modular_addition_freq_distribution';exec(cells['15'],e)
+current='symmetric_group_irrep_distribution';e['freq_group_data']=[tuple(x) for x in m['data_adapter']['s4']['categories']]
+exec(cells['15'][cells['15'].index('# Sort by proportion (ascending order)'):],e)
+m.setdefault('presentation_script_hashes',{}).update({p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in [Path(__file__),ROOT/'scripts/paper_plot_revisions.py']})
+m['presentation_revision_description']=m['presentation_revision_description'].replace('distribution labels above points','fixed distribution label sides: Z30 blue above/red below; S4 blue below/red above')
+(OUT/'manifest.json').write_text(json.dumps(m,indent=2))
+print('DONE: fixed 12-point offsets; Z30 blue above/red below; S4 blue below/red above; zero numeric-label overlaps; plotted data unchanged.')

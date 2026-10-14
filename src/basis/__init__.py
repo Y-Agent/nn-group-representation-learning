@@ -1,11 +1,10 @@
 """Basis definitions for spectral analysis."""
 
-from typing import Union, List
+from .alternating import AlternatingGroupBasis
 from .base import Basis
 from .fourier import FourierBasis
-from .symmetric import SymmetricGroupBasis
-from .alternating import AlternatingGroupBasis
 from .frobenius21 import Frobenius21Basis
+from .symmetric import SymmetricGroupBasis
 
 # Basis registry
 BASIS_REGISTRY = {
@@ -37,7 +36,16 @@ def get_basis(name: str, **kwargs) -> Basis:
     elif "n" in kwargs and "p" in kwargs:
         kwargs.pop("p")  # n takes precedence
 
+    if name == "frobenius21":
+        kwargs = {}
     return BASIS_REGISTRY[name](**kwargs)
 
 
-__all__ = ["Basis", "get_basis", "FourierBasis", "SymmetricGroupBasis", "AlternatingGroupBasis", "Frobenius21Basis"]
+__all__ = [
+    "Basis",
+    "get_basis",
+    "FourierBasis",
+    "SymmetricGroupBasis",
+    "AlternatingGroupBasis",
+    "Frobenius21Basis",
+]

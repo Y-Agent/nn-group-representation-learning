@@ -2,14 +2,15 @@
 
 The model is parameterized by:
 - scale_in, scale_out: Shared scalar scales
-- W_in: Direction matrix with rows on the unit sphere
+- W_in: Each positional row block lies on its own unit sphere
 - W_out: Direction matrix with columns on the unit sphere
 """
+
+from typing import Dict, Literal, Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional, Dict, Literal
 
 
 class WideNetworkScaleSphere(nn.Module):
@@ -18,7 +19,7 @@ class WideNetworkScaleSphere(nn.Module):
     Architecture:
         input -> one_hot_embed -> scale_in * (embed @ W_in.T) -> activation -> scale_out * (h @ W_out.T) / M -> output
 
-    The key insight is that W_in rows and W_out columns are constrained to lie
+    The key insight is that W_in positional blocks and W_out columns lie
     on the unit sphere, while scale_in and scale_out are shared scalars that
     control the overall magnitude.
     """
@@ -42,6 +43,8 @@ class WideNetworkScaleSphere(nn.Module):
                         If False, concatenate embeddings (non-commutative: [e_x; e_y]).
         """
         super().__init__()
+        if d_vocab <= 0 or width <= 0:
+            raise ValueError("Vocabulary size and width must be positive")
         self.d_vocab = d_vocab
         self.width = width
         self.act_type = act_type
@@ -51,9 +54,10 @@ class WideNetworkScaleSphere(nn.Module):
         self.d_input = d_vocab if share_embed else 2 * d_vocab
 
         # Direction parameters (on unit sphere)
-        # W_in: each row has unit norm
+        # W_in: each positional block of each row has unit norm
         w_in = torch.randn(width, self.d_input)
-        w_in = w_in / w_in.norm(dim=1, keepdim=True)
+        blocks = w_in.reshape(width, -1, d_vocab)
+        w_in = (blocks / blocks.norm(dim=-1, keepdim=True)).reshape(width, self.d_input)
         self.W_in = nn.Parameter(w_in)
 
         # W_out: each column has unit norm
@@ -75,7 +79,7 @@ class WideNetworkScaleSphere(nn.Module):
             Logits of shape (batch_size, d_vocab)
         """
         # One-hot embedding
-        one_hot = F.one_hot(x, num_classes=self.d_vocab).float()  # (batch, 2, d_vocab)
+        one_hot = F.one_hot(x, num_classes=self.d_vocab).to(self.W_in.dtype)  # (batch, 2, d_vocab)
 
         if self.share_embed:
             # Sum embeddings (commutative): e_x + e_y
@@ -91,7 +95,7 @@ class WideNetworkScaleSphere(nn.Module):
         if self.act_type == "ReLU":
             h = F.relu(h)
         elif self.act_type == "Quad":
-            h = h ** 2
+            h = h**2
         elif self.act_type == "Abs":
             h = torch.abs(h)
         elif self.act_type == "GeLU":
@@ -103,11 +107,35 @@ class WideNetworkScaleSphere(nn.Module):
         out = self.scale_out * (h @ self.W_out.T) / self.width  # (batch, d_vocab)
         return out
 
+    def input_blocks(self):
+        """Separate positional spheres; shared input has one block."""
+        return self.W_in.reshape(self.width, -1, self.d_vocab)
+
+    @torch.no_grad()
     def normalize_directions(self) -> None:
-        """Project W_in and W_out back onto the unit sphere."""
-        with torch.no_grad():
-            self.W_in.data = self.W_in.data / self.W_in.data.norm(dim=1, keepdim=True)
-            self.W_out.data = self.W_out.data / self.W_out.data.norm(dim=0, keepdim=True)
+        """Retract each positional embedding and output onto its own sphere."""
+        blocks = self.input_blocks()
+        if torch.any(blocks.norm(dim=-1) == 0) or torch.any(self.W_out.norm(dim=0) == 0):
+            raise ValueError("Cannot normalize a zero direction")
+        blocks.div_(blocks.norm(dim=-1, keepdim=True))
+        self.W_out.div_(self.W_out.norm(dim=0, keepdim=True))
+
+    @torch.no_grad()
+    def project_direction_gradients(self) -> None:
+        """Project each sphere separately. Shared theta's 1/2 is applied by LR."""
+        if self.W_in.grad is not None:
+            w = self.input_blocks()
+            g = self.W_in.grad.reshape_as(w)
+            g.sub_((g * w).sum(dim=-1, keepdim=True) * w)
+        if self.W_out.grad is not None:
+            g, w = self.W_out.grad, self.W_out
+            g.sub_((g * w).sum(dim=0, keepdim=True) * w)
+
+    def effective_scale(self):
+        """For quadratic activation, the paper's a = scale_out * scale_in**2."""
+        if self.act_type != "Quad":
+            raise ValueError("Effective quadratic scale requires Quad activation")
+        return self.scale_out * self.scale_in.square()
 
     def get_direction_params(self):
         """Get parameters for direction (W_in, W_out)."""
@@ -126,7 +154,9 @@ class WideNetworkScaleSphere(nn.Module):
             "scale_out": self.scale_out.detach().cpu().clone(),
         }
 
-    def load_state(self, state: Dict[str, torch.Tensor], device: Optional[torch.device] = None) -> None:
+    def load_state(
+        self, state: Dict[str, torch.Tensor], device: Optional[torch.device] = None
+    ) -> None:
         """Load model state from a state dict.
 
         Args:
@@ -136,15 +166,24 @@ class WideNetworkScaleSphere(nn.Module):
         if device is None:
             device = self.W_in.device
 
-        self.W_in.data = state["W_in"].clone().to(device)
-        self.W_out.data = state["W_out"].clone().to(device)
-        self.scale_in.data = state["scale_in"].clone().to(device)
-        self.scale_out.data = state["scale_out"].clone().to(device)
+        expected = {
+            name: getattr(self, name) for name in ("W_in", "W_out", "scale_in", "scale_out")
+        }
+        for name, parameter in expected.items():
+            if state[name].shape != parameter.shape:
+                raise ValueError(
+                    f"Checkpoint shape mismatch for {name}: {state[name].shape} != {parameter.shape}"
+                )
+        # Validate all shapes before mutating any parameter; retain parameter
+        # identity so existing optimizer references remain valid.
+        with torch.no_grad():
+            for name, parameter in expected.items():
+                parameter.copy_(state[name].to(device=device, dtype=parameter.dtype))
 
     def get_direction_norms(self) -> Dict[str, torch.Tensor]:
         """Get L2 norms of direction vectors (should be ~1 after normalization)."""
         return {
-            "W_in_norms": self.W_in.data.norm(dim=1),  # (width,)
+            "W_in_norms": self.input_blocks().detach().norm(dim=-1),  # (width,)
             "W_out_norms": self.W_out.data.norm(dim=0),  # (width,)
         }
 

@@ -6,10 +6,11 @@ Component-wise modular addition over product of cyclic groups:
 The operation is: (x ⊕ y)_j = (x_j + y_j) mod n_j for all j.
 """
 
-from typing import Tuple, Union, List
-import torch
 from functools import reduce
 from operator import mul
+from typing import List, Tuple, Union
+
+import torch
 
 from .base import Task
 
@@ -42,6 +43,9 @@ class ModularAddition(Task):
             self.n = [n]
         else:
             self.n = list(n)
+
+        if not self.n or any(not isinstance(n, int) or n <= 0 for n in self.n):
+            raise ValueError("Moduli must be positive integers")
 
         self.d = len(self.n)  # Number of components
         self._vocab_size = reduce(mul, self.n, 1)  # Product of all n_j
@@ -102,14 +106,12 @@ class ModularAddition(Task):
         """Generate all (x, y) pairs and their labels."""
         N = self._vocab_size
         data = torch.tensor(
-            [(i, j) for i in range(N) for j in range(N)],
-            dtype=torch.long,
-            device=device
+            [(i, j) for i in range(N) for j in range(N)], dtype=torch.long, device=device
         )
         labels = torch.tensor(
             [self.compute_label(i, j) for i in range(N) for j in range(N)],
             dtype=torch.long,
-            device=device
+            device=device,
         )
         return data, labels
 

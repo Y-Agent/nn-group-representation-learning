@@ -14,7 +14,8 @@ Presentation: G = ⟨x, y | x^7 = y^3 = 1, yxy^(-1) = x^2⟩
 where x = (1, 1) and y = (2, 0).
 """
 
-from typing import Tuple, List, Dict
+from typing import Dict, List, Tuple
+
 import torch
 
 from .base import Task
@@ -108,14 +109,12 @@ class Frobenius21Multiplication(Task):
         """Generate all (g, h) pairs and their product labels."""
         N = self._vocab_size
         data = torch.tensor(
-            [(i, j) for i in range(N) for j in range(N)],
-            dtype=torch.long,
-            device=device
+            [(i, j) for i in range(N) for j in range(N)], dtype=torch.long, device=device
         )
         labels = torch.tensor(
             [self.compute_label(i, j) for i in range(N) for j in range(N)],
             dtype=torch.long,
-            device=device
+            device=device,
         )
         return data, labels
 

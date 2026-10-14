@@ -1,0 +1,68 @@
+{
+  "f21": {
+    "group": "f21",
+    "width": 512,
+    "dt": 0.5,
+    "steps": 15000,
+    "seed": 42
+  },
+  "f21_scale": {
+    "group": "f21",
+    "width": 512,
+    "dt": 0.1,
+    "steps": 65000,
+    "seed": 42,
+    "stage2_dt": 0.1,
+    "stage2_steps": 40000
+  },
+  "z15": {
+    "group": "z15",
+    "width": 1024,
+    "dt": 20.48,
+    "steps": 4000,
+    "seed": 42
+  },
+  "z30": {
+    "group": "z30",
+    "width": 50000,
+    "dt": 1000,
+    "steps": 4000,
+    "seed": 42
+  },
+  "s4": {
+    "group": "s4",
+    "width": 50000,
+    "dt": 1000,
+    "steps": 2400,
+    "seed": 42,
+    "settings_source": "new: upstream S4 generator/settings absent; width matches Z30 comparison"
+  },
+  "phase": {
+    "group": "z15",
+    "width": 16,
+    "shared": true,
+    "init": "phase",
+    "dt": 0.01,
+    "steps": 7000,
+    "seed": 42,
+    "numpy_seed": 0
+  },
+  "competition": {
+    "group": "z15",
+    "width": 16,
+    "shared": true,
+    "init": "competition",
+    "dt": 0.01,
+    "steps": 21000,
+    "seed": 42,
+    "numpy_seed": 1
+  },
+  "f21_wide": {
+    "group": "f21",
+    "width": 2048,
+    "dt": 2.0,
+    "steps": 20000,
+    "seed": 42,
+    "settings_source": "User authorized increased width for perfect finite-network accuracy; Stage-I clock scales with M; extended to T/M=19.53125."
+  }
+}

@@ -16,11 +16,12 @@ The basis matrix B has rows indexed by (λ, i, j) where:
 This satisfies: B @ B^H = I (unitary/orthonormal basis)
 """
 
-from typing import List, Dict, Tuple, Optional
-import torch
-import numpy as np
-from math import factorial, sqrt
 from itertools import permutations
+from math import factorial, sqrt
+from typing import Dict, List, Tuple
+
+import numpy as np
+import torch
 
 from .base import Basis
 
@@ -30,6 +31,7 @@ def get_partitions(n: int) -> List[Tuple[int, ...]]:
 
     A partition is a tuple (λ_1, λ_2, ...) where λ_1 ≥ λ_2 ≥ ... > 0 and sum = n.
     """
+
     def _partition(n, max_val):
         if n == 0:
             yield ()
@@ -97,7 +99,7 @@ class SymmetricGroupBasis(Basis):
         if n < 2:
             raise ValueError(f"n must be at least 2, got {n}")
         if n > 4:
-            raise ValueError(f"n > 4 not yet supported (S_5 requires more careful implementation)")
+            raise ValueError("n > 4 not yet supported (S_5 requires more careful implementation)")
 
         self.n = n
         self._size = factorial(n)
@@ -168,12 +170,12 @@ class SymmetricGroupBasis(Basis):
         irreps = {}
 
         # S_3 elements
-        e = (0, 1, 2)      # identity
-        c1 = (1, 2, 0)     # (012) cycle
-        c2 = (2, 0, 1)     # (021) cycle
-        s1 = (0, 2, 1)     # (12) swap
-        s2 = (2, 1, 0)     # (02) swap
-        s3 = (1, 0, 2)     # (01) swap
+        e = (0, 1, 2)  # identity
+        c1 = (1, 2, 0)  # (012) cycle
+        c2 = (2, 0, 1)  # (021) cycle
+        s1 = (0, 2, 1)  # (12) swap
+        s2 = (2, 1, 0)  # (02) swap
+        s3 = (1, 0, 2)  # (01) swap
 
         # Trivial representation [3]: ρ(g) = 1
         irreps[(3,)] = {
@@ -205,10 +207,10 @@ class SymmetricGroupBasis(Basis):
         # Standard rep matrices (Young's orthogonal form)
         irreps[(2, 1)] = {
             e: np.array([[1.0, 0.0], [0.0, 1.0]]),
-            c1: np.array([[-0.5, -sqrt3/2], [sqrt3/2, -0.5]]),
-            c2: np.array([[-0.5, sqrt3/2], [-sqrt3/2, -0.5]]),
-            s1: np.array([[-0.5, sqrt3/2], [sqrt3/2, 0.5]]),
-            s2: np.array([[-0.5, -sqrt3/2], [-sqrt3/2, 0.5]]),
+            c1: np.array([[-0.5, sqrt3 / 2], [-sqrt3 / 2, -0.5]]),
+            c2: np.array([[-0.5, -sqrt3 / 2], [sqrt3 / 2, -0.5]]),
+            s1: np.array([[-0.5, sqrt3 / 2], [sqrt3 / 2, 0.5]]),
+            s2: np.array([[-0.5, -sqrt3 / 2], [-sqrt3 / 2, 0.5]]),
             s3: np.array([[1.0, 0.0], [0.0, -1.0]]),
         }
 
@@ -259,11 +261,13 @@ class SymmetricGroupBasis(Basis):
 
         # Change of basis matrix from natural rep to orthonormal complement of trivial
         # P: standard basis -> orthonormal basis for the 3D subspace orthogonal to (1,1,1,1)
-        P = np.array([
-            [1/sqrt2, -1/sqrt2, 0, 0],
-            [1/sqrt6, 1/sqrt6, -2/sqrt6, 0],
-            [1/sqrt12, 1/sqrt12, 1/sqrt12, -3/sqrt12]
-        ])
+        P = np.array(
+            [
+                [1 / sqrt2, -1 / sqrt2, 0, 0],
+                [1 / sqrt6, 1 / sqrt6, -2 / sqrt6, 0],
+                [1 / sqrt12, 1 / sqrt12, 1 / sqrt12, -3 / sqrt12],
+            ]
+        )
 
         irreps[(3, 1)] = {}
         for p in perms:
@@ -325,7 +329,7 @@ class SymmetricGroupBasis(Basis):
         # (01):
         rho_22[s] = np.array([[1.0, 0.0], [0.0, -1.0]])
         # (12):
-        rho_22[t] = np.array([[-0.5, sqrt(3)/2], [sqrt(3)/2, 0.5]])
+        rho_22[t] = np.array([[-0.5, sqrt(3) / 2], [sqrt(3) / 2, 0.5]])
         # (23):
         rho_22[u] = np.array([[1.0, 0.0], [0.0, -1.0]])
 
@@ -408,10 +412,10 @@ class SymmetricGroupBasis(Basis):
         names = []
         for partition in self._partitions:
             dim = self._partition_dims[partition]
-            part_str = ','.join(map(str, partition))
+            part_str = ",".join(map(str, partition))
             for i in range(dim):
                 for j in range(dim):
-                    names.append(f"ρ_[{part_str}]({i+1},{j+1})")
+                    names.append(f"ρ_[{part_str}]({i + 1},{j + 1})")
         return names
 
     def get_basis_matrix(self, device: torch.device = None) -> torch.Tensor:
@@ -428,7 +432,7 @@ class SymmetricGroupBasis(Basis):
             This is a unitary matrix: B @ B^H = I
         """
         if device is None:
-            device = torch.device('cpu')
+            device = torch.device("cpu")
 
         device_key = str(device)
         if device_key in self._basis_cache:
@@ -469,8 +473,7 @@ class SymmetricGroupBasis(Basis):
             To get paper's ν̂[ρ] = (1/|G|) Σ_g ν(g) ρ(g^{-1}), use transform_paper().
         """
         basis = self.get_basis_matrix(signal.device)
-        if not signal.is_complex():
-            signal = signal.to(torch.complex128)
+        signal = signal.to(basis.dtype)
         return signal @ basis.T.conj()
 
     def transform_paper(self, signal: torch.Tensor) -> torch.Tensor:
@@ -499,7 +502,7 @@ class SymmetricGroupBasis(Basis):
             d = self._partition_dims[partition]
             block_size = d * d
             scale = np.sqrt(N * d)
-            nu_hat[..., curr_idx:curr_idx + block_size] /= scale
+            nu_hat[..., curr_idx : curr_idx + block_size] /= scale
             curr_idx += block_size
 
         return nu_hat
@@ -517,7 +520,7 @@ class SymmetricGroupBasis(Basis):
             Complex tensor of shape (..., n!)
         """
         basis = self.get_basis_matrix(coeffs.device)
-        return coeffs @ basis
+        return coeffs.to(basis.dtype) @ basis
 
     def get_irrep_block_indices(self, partition: Tuple[int, ...]) -> Tuple[int, int]:
         """Get the start and end indices for an irrep block in the basis.
@@ -581,8 +584,8 @@ class SymmetricGroupBasis(Basis):
                 local_idx = idx - curr_idx
                 i = local_idx // dim
                 j = local_idx % dim
-                part_str = ','.join(map(str, partition))
-                return f"[{part_str}]({i+1},{j+1})"
+                part_str = ",".join(map(str, partition))
+                return f"[{part_str}]({i + 1},{j + 1})"
             curr_idx += block_size
         return f"idx={idx}"
 

@@ -7,7 +7,7 @@ task:
 
 # Basis specification
 basis:
-  name: "fourier"            # Basis type: fourier, walsh, etc.
+  name: "fourier"            # Basis type: fourier, frobenius21, symmetric, alternating
 
 # Model configuration
 model:
@@ -20,17 +20,17 @@ stage1:
   enabled: true
   lr: 0.001
   num_epochs: 6000
-  optimizer: "Adam"          # Adam or SGD
+  optimizer: "SGD"          # Plain SGD for the paper flow
   freeze_scales: true        # Keep scales fixed during stage 1
 
-# Stage 2: Standard GD (can train directions and/or scales)
+# Stage 2: SGD on direct effective coefficients with frozen directions
 stage2:
   enabled: true
   lr: 5.0
   num_epochs: 50000
-  optimizer: "SGD"           # Adam or SGD
-  train_directions: true     # Train W_in and W_out
-  train_scales: false        # Train scale_in and scale_out
+  optimizer: "SGD"           # Plain SGD for the paper flow
+  train_directions: false     # Directions remain frozen
+  train_scales: true        # Train the direct effective coefficient a
 
 # Logging and saving
 logging:
